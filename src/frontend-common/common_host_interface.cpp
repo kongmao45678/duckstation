@@ -43,6 +43,10 @@
 #include "discord_rpc.h"
 #endif
 
+#ifdef WITH_CHEEVOS
+#include "cheevos.h"
+#endif
+
 #ifdef WIN32
 #include "common/windows_headers.h"
 #include <KnownFolders.h>
@@ -89,6 +93,14 @@ bool CommonHostInterface::Initialize()
 
   CreateImGuiContext();
 
+#ifdef WITH_CHEEVOS
+  if (g_settings.cheevos_enabled)
+  {
+    if (!Cheevos::Initialize(this))
+      ReportError("Failed to initialize cheevos.");
+  }
+#endif
+
   return true;
 }
 
@@ -100,6 +112,10 @@ void CommonHostInterface::Shutdown()
 
 #ifdef WITH_DISCORD_PRESENCE
   ShutdownDiscordPresence();
+#endif
+
+#ifdef WITH_CHEEVOS
+  Cheevos::Shutdown();
 #endif
 
   if (m_controller_interface)
@@ -127,11 +143,17 @@ void CommonHostInterface::InitializeUserDirectory()
 
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("bios").c_str(), false);
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("cache").c_str(), false);
+  result &= FileSystem::CreateDirectory(
+    GetUserDirectoryRelativePath("cache" FS_OSPATH_SEPARATOR_STR "achievement_badge").c_str(), false);
+  result &= FileSystem::CreateDirectory(
+    GetUserDirectoryRelativePath("cache" FS_OSPATH_SEPARATOR_STR "achievement_gameicon").c_str(), false);
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("cheats").c_str(), false);
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("covers").c_str(), false);
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("dump").c_str(), false);
-  result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("dump/audio").c_str(), false);
-  result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("dump/textures").c_str(), false);
+  result &=
+    FileSystem::CreateDirectory(GetUserDirectoryRelativePath("dump" FS_OSPATH_SEPARATOR_STR "audio").c_str(), false);
+  result &=
+    FileSystem::CreateDirectory(GetUserDirectoryRelativePath("dump" FS_OSPATH_SEPARATOR_STR "textures").c_str(), false);
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("inputprofiles").c_str(), false);
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("memcards").c_str(), false);
   result &= FileSystem::CreateDirectory(GetUserDirectoryRelativePath("savestates").c_str(), false);
@@ -190,6 +212,15 @@ void CommonHostInterface::PowerOffSystem()
 
   if (InBatchMode())
     RequestExit();
+}
+
+void CommonHostInterface::ResetSystem()
+{
+  HostInterface::ResetSystem();
+
+#ifdef WITH_CHEEVOS
+  Cheevos::Reset();
+#endif
 }
 
 static void PrintCommandLineVersion(const char* frontend_name)
@@ -434,10 +465,22 @@ bool CommonHostInterface::ParseCommandLineParameters(int argc, char* argv[],
   return true;
 }
 
+void CommonHostInterface::OnAchievementsLoaded()
+{
+#ifdef WITH_CHEEVOS
+  // noop
+#endif
+}
+
 void CommonHostInterface::PollAndUpdate()
 {
 #ifdef WITH_DISCORD_PRESENCE
   PollDiscordPresence();
+#endif
+
+#ifdef WITH_CHEEVOS
+  if (Cheevos::IsActive())
+    Cheevos::Update();
 #endif
 }
 
@@ -610,6 +653,20 @@ void CommonHostInterface::UpdateControllerInterface()
       m_controller_interface.reset();
     }
   }
+}
+
+bool CommonHostInterface::LoadState(const char* filename)
+{
+  const bool system_was_valid = System::IsValid();
+  const bool result = HostInterface::LoadState(filename);
+  if (system_was_valid || !result)
+  {
+#ifdef WITH_CHEEVOS
+    Cheevos::Reset();
+#endif
+  }
+
+  return result;
 }
 
 bool CommonHostInterface::LoadState(bool global, s32 slot)
@@ -923,6 +980,11 @@ void CommonHostInterface::OnRunningGameChanged(const std::string& path, CDImage*
 
 #ifdef WITH_DISCORD_PRESENCE
   UpdateDiscordPresence();
+#endif
+
+#ifdef WITH_CHEEVOS
+  if (Cheevos::IsLoggedIn())
+    Cheevos::GameChanged(path, image);
 #endif
 }
 
@@ -2583,6 +2645,19 @@ void CommonHostInterface::CheckForSettingsChanges(const Settings& old_settings)
                       g_settings.log_to_console, g_settings.log_to_debug, g_settings.log_to_window,
                       g_settings.log_to_file);
   }
+
+#ifdef WITH_CHEEVOS
+  if (g_settings.cheevos_enabled != old_settings.cheevos_enabled ||
+      g_settings.cheevos_test_mode != old_settings.cheevos_test_mode)
+  {
+    Cheevos::Shutdown();
+    if (g_settings.cheevos_enabled)
+    {
+      if (!Cheevos::Initialize(this))
+        ReportError("Failed to initialize cheevos after settings change.");
+    }
+  }
+#endif
 
   UpdateInputMap();
 }

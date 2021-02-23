@@ -137,6 +137,7 @@ Q_SIGNALS:
   void exitRequested();
   void inputProfileLoaded();
   void mouseModeRequested(bool relative, bool hide_cursor);
+  void achievementsLoaded(quint32 id, const QString& game_info_string, quint32 total, quint32 points);
 
 public Q_SLOTS:
   void setDefaultSettings();
@@ -176,6 +177,7 @@ public Q_SLOTS:
   void reloadPostProcessingShaders();
   void requestRenderWindowScale(qreal scale);
   void executeOnEmulationThread(std::function<void()> callback, bool wait = false);
+  void OnAchievementsLoaded() override;
 
 private Q_SLOTS:
   void doStopThread();

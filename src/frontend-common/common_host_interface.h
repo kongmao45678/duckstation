@@ -93,7 +93,6 @@ public:
     std::vector<u32> screenshot_data;
   };
 
-  using HostInterface::LoadState;
   using HostInterface::SaveState;
 
   /// Returns the name of the frontend.
@@ -127,6 +126,7 @@ public:
 
   virtual bool BootSystem(const SystemBootParameters& parameters) override;
   virtual void PowerOffSystem() override;
+  virtual void ResetSystem() override;
   virtual void DestroySystem() override;
 
   /// Returns the settings interface.
@@ -164,6 +164,9 @@ public:
 
   /// Saves the current input configuration to the specified profile name.
   bool SaveInputProfile(const char* profile_path);
+
+  /// Loads state from the specified filename.
+  bool LoadState(const char* filename);
 
   /// Loads the current emulation state from file. Specifying a slot of -1 loads the "resume" game state.
   bool LoadState(bool global, s32 slot);
@@ -272,6 +275,9 @@ public:
 
   /// Returns a pointer to the top-level window, needed by some controller interfaces.
   virtual void* GetTopLevelWindowHandle() const;
+
+  /// Called when achievements data is loaded.
+  virtual void OnAchievementsLoaded();
 
   /// Opens a file in the DuckStation "package".
   /// This is the APK for Android builds, or the program directory for standalone builds.

@@ -43,6 +43,10 @@ Log_SetChannel(QtHostInterface);
 #include <ShlObj.h>
 #endif
 
+#ifdef WITH_CHEEVOS
+#include "frontend-common/cheevos.h"
+#endif
+
 QtHostInterface::QtHostInterface(QObject* parent) : QObject(parent), CommonHostInterface()
 {
   qRegisterMetaType<std::shared_ptr<const SystemBootParameters>>();
@@ -1308,6 +1312,34 @@ void QtHostInterface::saveScreenshot()
   SaveScreenshot(nullptr, true, true);
 }
 
+void QtHostInterface::OnAchievementsLoaded()
+{
+#ifdef WITH_CHEEVOS
+  QString game_info;
+
+  if (Cheevos::HasActiveGame())
+  {
+    game_info = tr("Game ID: %1\n"
+                   "Game Title: %2\n"
+                   "Game Developer: %3\n"
+                   "Game Publisher: %4\n"
+                   "Achievements: %5 (%6 points)")
+                  .arg(Cheevos::GetGameID())
+                  .arg(QString::fromStdString(Cheevos::GetGameTitle()))
+                  .arg(QString::fromStdString(Cheevos::GetGameDeveloper()))
+                  .arg(QString::fromStdString(Cheevos::GetGamePublisher()))
+                  .arg(Cheevos::GetAchievementCount())
+                  .arg(Cheevos::GetMaximumPointsForGame());
+  }
+  else
+  {
+    game_info = tr("Game not loaded or no RetroAchievements available.");
+  }
+
+  emit achievementsLoaded(Cheevos::GetGameID(), game_info, Cheevos::GetAchievementCount(),
+                          Cheevos::GetMaximumPointsForGame());
+#endif
+}
 void QtHostInterface::doBackgroundControllerPoll()
 {
   PollAndUpdate();
