@@ -1,6 +1,6 @@
-// Copyright 2019 Dolphin Emulator Project
-// Licensed under GPLv2+
-// Refer to the license.txt file included.
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// Parts originally from Dolphin Emulator, also written by myself.
 
 #pragma once
 
@@ -44,15 +44,29 @@ public:
   DescriptorHeapManager();
   ~DescriptorHeapManager();
 
-  ID3D12DescriptorHeap* GetDescriptorHeap() const { return m_descriptor_heap.Get(); }
-  u32 GetDescriptorIncrementSize() const { return m_descriptor_increment_size; }
+  ALWAYS_INLINE ID3D12DescriptorHeap* GetDescriptorHeap() const { return m_descriptor_heap.Get(); }
+  ALWAYS_INLINE u32 GetDescriptorIncrementSize() const { return m_descriptor_increment_size; }
+
+  ALWAYS_INLINE D3D12_CPU_DESCRIPTOR_HANDLE OffsetCPUHandle(D3D12_CPU_DESCRIPTOR_HANDLE handle, u32 count) const
+  {
+    D3D12_CPU_DESCRIPTOR_HANDLE ret;
+    ret.ptr = handle.ptr + m_descriptor_increment_size * count;
+    return ret;
+  }
+
+  ALWAYS_INLINE D3D12_GPU_DESCRIPTOR_HANDLE OffsetGPUHandle(D3D12_GPU_DESCRIPTOR_HANDLE handle, u32 count) const
+  {
+    D3D12_GPU_DESCRIPTOR_HANDLE ret;
+    ret.ptr = handle.ptr + m_descriptor_increment_size * count;
+    return ret;
+  }
 
   bool Create(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, u32 num_descriptors, bool shader_visible);
   void Destroy();
 
-  bool Allocate(DescriptorHandle* handle);
-  void Free(DescriptorHandle* handle);
-  void Free(u32 index);
+  bool Allocate(DescriptorHandle* handle, u32 count = 1);
+  void Free(DescriptorHandle* handle, u32 count = 1);
+  void Free(u32 index, u32 count = 1);
 
 private:
   Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descriptor_heap;

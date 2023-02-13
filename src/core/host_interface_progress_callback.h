@@ -1,6 +1,8 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/progress_callback.h"
-#include "host_interface.h"
 
 class HostInterfaceProgressCallback final : public BaseProgressCallback
 {

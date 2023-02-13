@@ -1,18 +1,21 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "cpu_core.h"
 #include "bus.h"
 #include "common/align.h"
 #include "common/file_system.h"
 #include "common/log.h"
-#include "common/state_wrapper.h"
 #include "cpu_core_private.h"
 #include "cpu_disasm.h"
 #include "cpu_recompiler_thunks.h"
 #include "gte.h"
-#include "host_interface.h"
+#include "host.h"
 #include "pgxp.h"
 #include "settings.h"
 #include "system.h"
 #include "timing_event.h"
+#include "util/state_wrapper.h"
 #include <cstdio>
 
 Log_SetChannel(CPU::Core);
@@ -67,9 +70,6 @@ void StopTrace()
 
 void WriteToExecutionLog(const char* format, ...)
 {
-  std::va_list ap;
-  va_start(ap, format);
-
   if (!s_log_file_opened)
   {
     s_log_file = FileSystem::OpenCFile("cpu_log.txt", "wb");
@@ -78,13 +78,15 @@ void WriteToExecutionLog(const char* format, ...)
 
   if (s_log_file)
   {
+    std::va_list ap;
+    va_start(ap, format);
     std::vfprintf(s_log_file, format, ap);
+    va_end(ap);
+
 #ifdef _DEBUG
     std::fflush(s_log_file);
 #endif
   }
-
-  va_end(ap);
 }
 
 void Initialize()
@@ -539,6 +541,8 @@ ALWAYS_INLINE_RELEASE void Cop0DataBreakpointCheck(VirtualMemoryAddress address)
   DispatchCop0Breakpoint();
 }
 
+#ifdef _DEBUG
+
 static void TracePrintInstruction()
 {
   const u32 pc = g_state.current_instruction_pc;
@@ -558,6 +562,8 @@ static void TracePrintInstruction()
 
   std::printf("%08x: %08x %s\n", pc, bits, instr.GetCharArray());
 }
+
+#endif
 
 static void PrintInstruction(u32 bits, u32 pc, Registers* regs, const char* prefix)
 {
@@ -592,6 +598,114 @@ static void LogInstruction(u32 bits, u32 pc, Registers* regs)
 
   WriteToExecutionLog("%08x: %08x %s\n", pc, bits, instr.GetCharArray());
 }
+
+const std::array<DebuggerRegisterListEntry, NUM_DEBUGGER_REGISTER_LIST_ENTRIES> g_debugger_register_list = {
+  {{"zero", &CPU::g_state.regs.zero},
+   {"at", &CPU::g_state.regs.at},
+   {"v0", &CPU::g_state.regs.v0},
+   {"v1", &CPU::g_state.regs.v1},
+   {"a0", &CPU::g_state.regs.a0},
+   {"a1", &CPU::g_state.regs.a1},
+   {"a2", &CPU::g_state.regs.a2},
+   {"a3", &CPU::g_state.regs.a3},
+   {"t0", &CPU::g_state.regs.t0},
+   {"t1", &CPU::g_state.regs.t1},
+   {"t2", &CPU::g_state.regs.t2},
+   {"t3", &CPU::g_state.regs.t3},
+   {"t4", &CPU::g_state.regs.t4},
+   {"t5", &CPU::g_state.regs.t5},
+   {"t6", &CPU::g_state.regs.t6},
+   {"t7", &CPU::g_state.regs.t7},
+   {"s0", &CPU::g_state.regs.s0},
+   {"s1", &CPU::g_state.regs.s1},
+   {"s2", &CPU::g_state.regs.s2},
+   {"s3", &CPU::g_state.regs.s3},
+   {"s4", &CPU::g_state.regs.s4},
+   {"s5", &CPU::g_state.regs.s5},
+   {"s6", &CPU::g_state.regs.s6},
+   {"s7", &CPU::g_state.regs.s7},
+   {"t8", &CPU::g_state.regs.t8},
+   {"t9", &CPU::g_state.regs.t9},
+   {"k0", &CPU::g_state.regs.k0},
+   {"k1", &CPU::g_state.regs.k1},
+   {"gp", &CPU::g_state.regs.gp},
+   {"sp", &CPU::g_state.regs.sp},
+   {"fp", &CPU::g_state.regs.fp},
+   {"ra", &CPU::g_state.regs.ra},
+   {"hi", &CPU::g_state.regs.hi},
+   {"lo", &CPU::g_state.regs.lo},
+   {"pc", &CPU::g_state.regs.pc},
+   {"npc", &CPU::g_state.regs.npc},
+
+   {"COP0_SR", &CPU::g_state.cop0_regs.sr.bits},
+   {"COP0_CAUSE", &CPU::g_state.cop0_regs.cause.bits},
+   {"COP0_EPC", &CPU::g_state.cop0_regs.EPC},
+   {"COP0_BadVAddr", &CPU::g_state.cop0_regs.BadVaddr},
+
+   {"V0_XY", &CPU::g_state.gte_regs.r32[0]},
+   {"V0_Z", &CPU::g_state.gte_regs.r32[1]},
+   {"V1_XY", &CPU::g_state.gte_regs.r32[2]},
+   {"V1_Z", &CPU::g_state.gte_regs.r32[3]},
+   {"V2_XY", &CPU::g_state.gte_regs.r32[4]},
+   {"V2_Z", &CPU::g_state.gte_regs.r32[5]},
+   {"RGBC", &CPU::g_state.gte_regs.r32[6]},
+   {"OTZ", &CPU::g_state.gte_regs.r32[7]},
+   {"IR0", &CPU::g_state.gte_regs.r32[8]},
+   {"IR1", &CPU::g_state.gte_regs.r32[9]},
+   {"IR2", &CPU::g_state.gte_regs.r32[10]},
+   {"IR3", &CPU::g_state.gte_regs.r32[11]},
+   {"SXY0", &CPU::g_state.gte_regs.r32[12]},
+   {"SXY1", &CPU::g_state.gte_regs.r32[13]},
+   {"SXY2", &CPU::g_state.gte_regs.r32[14]},
+   {"SXYP", &CPU::g_state.gte_regs.r32[15]},
+   {"SZ0", &CPU::g_state.gte_regs.r32[16]},
+   {"SZ1", &CPU::g_state.gte_regs.r32[17]},
+   {"SZ2", &CPU::g_state.gte_regs.r32[18]},
+   {"SZ3", &CPU::g_state.gte_regs.r32[19]},
+   {"RGB0", &CPU::g_state.gte_regs.r32[20]},
+   {"RGB1", &CPU::g_state.gte_regs.r32[21]},
+   {"RGB2", &CPU::g_state.gte_regs.r32[22]},
+   {"RES1", &CPU::g_state.gte_regs.r32[23]},
+   {"MAC0", &CPU::g_state.gte_regs.r32[24]},
+   {"MAC1", &CPU::g_state.gte_regs.r32[25]},
+   {"MAC2", &CPU::g_state.gte_regs.r32[26]},
+   {"MAC3", &CPU::g_state.gte_regs.r32[27]},
+   {"IRGB", &CPU::g_state.gte_regs.r32[28]},
+   {"ORGB", &CPU::g_state.gte_regs.r32[29]},
+   {"LZCS", &CPU::g_state.gte_regs.r32[30]},
+   {"LZCR", &CPU::g_state.gte_regs.r32[31]},
+   {"RT_0", &CPU::g_state.gte_regs.r32[32]},
+   {"RT_1", &CPU::g_state.gte_regs.r32[33]},
+   {"RT_2", &CPU::g_state.gte_regs.r32[34]},
+   {"RT_3", &CPU::g_state.gte_regs.r32[35]},
+   {"RT_4", &CPU::g_state.gte_regs.r32[36]},
+   {"TRX", &CPU::g_state.gte_regs.r32[37]},
+   {"TRY", &CPU::g_state.gte_regs.r32[38]},
+   {"TRZ", &CPU::g_state.gte_regs.r32[39]},
+   {"LLM_0", &CPU::g_state.gte_regs.r32[40]},
+   {"LLM_1", &CPU::g_state.gte_regs.r32[41]},
+   {"LLM_2", &CPU::g_state.gte_regs.r32[42]},
+   {"LLM_3", &CPU::g_state.gte_regs.r32[43]},
+   {"LLM_4", &CPU::g_state.gte_regs.r32[44]},
+   {"RBK", &CPU::g_state.gte_regs.r32[45]},
+   {"GBK", &CPU::g_state.gte_regs.r32[46]},
+   {"BBK", &CPU::g_state.gte_regs.r32[47]},
+   {"LCM_0", &CPU::g_state.gte_regs.r32[48]},
+   {"LCM_1", &CPU::g_state.gte_regs.r32[49]},
+   {"LCM_2", &CPU::g_state.gte_regs.r32[50]},
+   {"LCM_3", &CPU::g_state.gte_regs.r32[51]},
+   {"LCM_4", &CPU::g_state.gte_regs.r32[52]},
+   {"RFC", &CPU::g_state.gte_regs.r32[53]},
+   {"GFC", &CPU::g_state.gte_regs.r32[54]},
+   {"BFC", &CPU::g_state.gte_regs.r32[55]},
+   {"OFX", &CPU::g_state.gte_regs.r32[56]},
+   {"OFY", &CPU::g_state.gte_regs.r32[57]},
+   {"H", &CPU::g_state.gte_regs.r32[58]},
+   {"DQA", &CPU::g_state.gte_regs.r32[59]},
+   {"DQB", &CPU::g_state.gte_regs.r32[60]},
+   {"ZSF3", &CPU::g_state.gte_regs.r32[61]},
+   {"ZSF4", &CPU::g_state.gte_regs.r32[62]},
+   {"FLAG", &CPU::g_state.gte_regs.r32[63]}}};
 
 ALWAYS_INLINE static constexpr bool AddOverflow(u32 old_value, u32 add_value, u32 new_value)
 {
@@ -1688,8 +1802,8 @@ bool AddBreakpoint(VirtualMemoryAddress address, bool auto_clear, bool enabled)
 
   if (!auto_clear)
   {
-    g_host_interface->ReportFormattedDebuggerMessage(
-      g_host_interface->TranslateString("DebuggerMessage", "Added breakpoint at 0x%08X."), address);
+    Host::ReportFormattedDebuggerMessage(Host::TranslateString("DebuggerMessage", "Added breakpoint at 0x%08X."),
+                                         address);
   }
 
   return true;
@@ -1715,8 +1829,8 @@ bool RemoveBreakpoint(VirtualMemoryAddress address)
   if (it == s_breakpoints.end())
     return false;
 
-  g_host_interface->ReportFormattedDebuggerMessage(
-    g_host_interface->TranslateString("DebuggerMessage", "Removed breakpoint at 0x%08X."), address);
+  Host::ReportFormattedDebuggerMessage(Host::TranslateString("DebuggerMessage", "Removed breakpoint at 0x%08X."),
+                                       address);
 
   s_breakpoints.erase(it);
   UpdateDebugDispatcherFlag();
@@ -1747,8 +1861,8 @@ bool AddStepOverBreakpoint()
 
   if (!IsCallInstruction(inst))
   {
-    g_host_interface->ReportFormattedDebuggerMessage(
-      g_host_interface->TranslateString("DebuggerMessage", "0x%08X is not a call instruction."), g_state.regs.pc);
+    Host::ReportFormattedDebuggerMessage(Host::TranslateString("DebuggerMessage", "0x%08X is not a call instruction."),
+                                         g_state.regs.pc);
     return false;
   }
 
@@ -1757,16 +1871,15 @@ bool AddStepOverBreakpoint()
 
   if (IsBranchInstruction(inst))
   {
-    g_host_interface->ReportFormattedDebuggerMessage(
-      g_host_interface->TranslateString("DebuggerMessage", "Can't step over double branch at 0x%08X"), g_state.regs.pc);
+    Host::ReportFormattedDebuggerMessage(
+      Host::TranslateString("DebuggerMessage", "Can't step over double branch at 0x%08X"), g_state.regs.pc);
     return false;
   }
 
   // skip the delay slot
   bp_pc += sizeof(Instruction);
 
-  g_host_interface->ReportFormattedDebuggerMessage(
-    g_host_interface->TranslateString("DebuggerMessage", "Stepping over to 0x%08X."), bp_pc);
+  Host::ReportFormattedDebuggerMessage(Host::TranslateString("DebuggerMessage", "Stepping over to 0x%08X."), bp_pc);
 
   return AddBreakpoint(bp_pc, true);
 }
@@ -1782,25 +1895,22 @@ bool AddStepOutBreakpoint(u32 max_instructions_to_search)
     Instruction inst;
     if (!SafeReadInstruction(ret_pc, &inst.bits))
     {
-      g_host_interface->ReportFormattedDebuggerMessage(
-        g_host_interface->TranslateString("DebuggerMessage",
-                                          "Instruction read failed at %08X while searching for function end."),
+      Host::ReportFormattedDebuggerMessage(
+        Host::TranslateString("DebuggerMessage", "Instruction read failed at %08X while searching for function end."),
         ret_pc);
       return false;
     }
 
     if (IsReturnInstruction(inst))
     {
-      g_host_interface->ReportFormattedDebuggerMessage(
-        g_host_interface->TranslateString("DebuggerMessage", "Stepping out to 0x%08X."), ret_pc);
+      Host::ReportFormattedDebuggerMessage(Host::TranslateString("DebuggerMessage", "Stepping out to 0x%08X."), ret_pc);
 
       return AddBreakpoint(ret_pc, true);
     }
   }
 
-  g_host_interface->ReportFormattedDebuggerMessage(
-    g_host_interface->TranslateString("DebuggerMessage",
-                                      "No return instruction found after %u instructions for step-out at %08X."),
+  Host::ReportFormattedDebuggerMessage(
+    Host::TranslateString("DebuggerMessage", "No return instruction found after %u instructions for step-out at %08X."),
     max_instructions_to_search, g_state.regs.pc);
 
   return false;
@@ -1854,18 +1964,18 @@ ALWAYS_INLINE_RELEASE static bool BreakpointCheck()
     }
     else
     {
-      g_host_interface->PauseSystem(true);
+      System::PauseSystem(true);
 
       if (bp.auto_clear)
       {
-        g_host_interface->ReportFormattedDebuggerMessage("Stopped execution at 0x%08X.", pc);
+        Host::ReportFormattedDebuggerMessage("Stopped execution at 0x%08X.", pc);
         s_breakpoints.erase(s_breakpoints.begin() + i);
         count--;
         UpdateDebugDispatcherFlag();
       }
       else
       {
-        g_host_interface->ReportFormattedDebuggerMessage("Hit breakpoint %u at 0x%08X.", bp.number, pc);
+        Host::ReportFormattedDebuggerMessage("Hit breakpoint %u at 0x%08X.", bp.number, pc);
         i++;
       }
     }
@@ -1976,7 +2086,7 @@ void SingleStep()
 {
   s_single_step = true;
   ExecuteDebug();
-  g_host_interface->ReportFormattedDebuggerMessage("Stepped to 0x%08X.", g_state.regs.pc);
+  Host::ReportFormattedDebuggerMessage("Stepped to 0x%08X.", g_state.regs.pc);
 }
 
 namespace CodeCache {

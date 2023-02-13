@@ -1,8 +1,11 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "postprocessing_shadergen.h"
 
 namespace FrontendCommon {
 
-PostProcessingShaderGen::PostProcessingShaderGen(HostDisplay::RenderAPI render_api, bool supports_dual_source_blend)
+PostProcessingShaderGen::PostProcessingShaderGen(RenderAPI render_api, bool supports_dual_source_blend)
   : ShaderGen(render_api, supports_dual_source_blend)
 {
 }
@@ -106,6 +109,14 @@ float2 GetCoordinates()
 {
   return v_tex0;
 }
+float2 GetOriginalSize()
+{
+  return original_size;
+}
+float2 GetPaddedOriginalSize()
+{
+  return padded_original_size;
+}
 float GetTime()
 {
   return time;
@@ -150,6 +161,8 @@ void PostProcessingShaderGen::WriteUniformBuffer(std::stringstream& ss, const Po
   ss << "  float2 rcp_resolution;\n";
   ss << "  float2 window_resolution;\n";
   ss << "  float2 rcp_window_resolution;\n";
+  ss << "  float2 original_size;\n";
+  ss << "  float2 padded_original_size;\n";
   ss << "  float time;\n";
   ss << "  float ubo_pad" << (pad_counter++) << ";\n";
   ss << "\n";

@@ -1,10 +1,13 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com> and contributors.
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "gdb_protocol.h"
 #include "bus.h"
 #include "cpu_core_private.h"
 #include "common/log.h"
 #include "common/string_util.h"
 #include "cpu_core.h"
-#include "frontend-common/common_host_interface.h"
+#include "frontend-common/common_host.h"
 #include "system.h"
 #include <functional>
 #include <iomanip>

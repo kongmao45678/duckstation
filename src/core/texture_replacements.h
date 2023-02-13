@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/hash_combine.h"
 #include "common/image.h"
@@ -69,6 +72,7 @@ private:
                                        ReplacmentType* replacement_type);
 
   std::string GetSourceDirectory() const;
+  std::string GetDumpDirectory() const;
 
   TextureReplacementHash GetVRAMWriteHash(u32 width, u32 height, const void* pixels) const;
   std::string GetVRAMWriteDumpFilename(u32 width, u32 height, const void* pixels) const;

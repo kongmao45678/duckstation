@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "context_egl.h"
 #include "../assert.h"
 #include "../log.h"
@@ -128,6 +131,11 @@ void ContextEGL::ResizeSurface(u32 new_surface_width /*= 0*/, u32 new_surface_he
 bool ContextEGL::SwapBuffers()
 {
   return eglSwapBuffers(m_display, m_surface);
+}
+
+bool ContextEGL::IsCurrent()
+{
+  return m_context && eglGetCurrentContext() == m_context;
 }
 
 bool ContextEGL::MakeCurrent()

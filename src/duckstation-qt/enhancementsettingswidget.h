@@ -1,10 +1,12 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 
 #include <QtWidgets/QWidget>
 
 #include "ui_enhancementsettingswidget.h"
 
-class QtHostInterface;
 class SettingsDialog;
 
 class EnhancementSettingsWidget : public QWidget
@@ -12,7 +14,7 @@ class EnhancementSettingsWidget : public QWidget
   Q_OBJECT
 
 public:
-  EnhancementSettingsWidget(QtHostInterface* host_interface, QWidget* parent, SettingsDialog* dialog);
+  EnhancementSettingsWidget(SettingsDialog* dialog, QWidget* parent);
   ~EnhancementSettingsWidget();
 
 private Q_SLOTS:
@@ -24,5 +26,5 @@ private:
 
   Ui::EnhancementSettingsWidget m_ui;
 
-  QtHostInterface* m_host_interface;
+  SettingsDialog* m_dialog;
 };

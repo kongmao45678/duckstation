@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "../types.h"
 #include "../window_info.h"
@@ -43,6 +46,7 @@ public:
   virtual bool ChangeSurface(const WindowInfo& new_wi) = 0;
   virtual void ResizeSurface(u32 new_surface_width = 0, u32 new_surface_height = 0) = 0;
   virtual bool SwapBuffers() = 0;
+  virtual bool IsCurrent() = 0;
   virtual bool MakeCurrent() = 0;
   virtual bool DoneCurrent() = 0;
   virtual bool SetSwapInterval(s32 interval) = 0;

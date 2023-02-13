@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "builders.h"
 #include "../assert.h"
 #include "util.h"
@@ -438,6 +441,11 @@ void SamplerBuilder::SetAddressMode(VkSamplerAddressMode u, VkSamplerAddressMode
   m_ci.addressModeU = u;
   m_ci.addressModeV = v;
   m_ci.addressModeW = w;
+}
+
+void SamplerBuilder::SetBorderColor(VkBorderColor color)
+{
+  m_ci.borderColor = color;
 }
 
 void SamplerBuilder::SetPointSampler(VkSamplerAddressMode address_mode /* = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER */)

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/types.h"
 
@@ -58,8 +61,12 @@ enum class GPURenderer : u8
   HardwareD3D11,
   HardwareD3D12,
 #endif
+#ifdef WITH_VULKAN
   HardwareVulkan,
+#endif
+#ifdef WITH_OPENGL
   HardwareOpenGL,
+#endif
   Software,
   Count
 };
@@ -105,16 +112,25 @@ enum class DisplayAspectRatio : u8
   Count
 };
 
+enum class DisplayAlignment
+{
+  LeftOrTop,
+  Center,
+  RightOrBottom,
+  Count
+};
+
 enum class AudioBackend : u8
 {
   Null,
+#ifdef WITH_CUBEB
   Cubeb,
+#endif
 #ifdef _WIN32
   XAudio2,
 #endif
-#ifndef ANDROID
-  SDL,
-#else
+#ifdef __ANDROID__
+  AAudio,
   OpenSLES,
 #endif
   Count
@@ -126,7 +142,7 @@ enum class ControllerType
   DigitalController,
   AnalogController,
   AnalogJoystick,
-  NamcoGunCon,
+  GunCon,
   PlayStationMouse,
   NeGcon,
   Count

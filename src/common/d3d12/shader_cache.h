@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "../hash_combine.h"
 #include "../types.h"
@@ -111,7 +114,6 @@ private:
   CacheIndex m_pipeline_index;
 
   D3D_FEATURE_LEVEL m_feature_level = D3D_FEATURE_LEVEL_11_0;
-  bool m_use_pipeline_cache = false;
   bool m_debug = false;
 };
 

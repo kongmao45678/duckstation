@@ -3,11 +3,16 @@
 VERSION_FILE="scmversion.cpp"
 
 CURDIR=$(pwd)
-cd $(dirname $(readlink -f $0))
+if [ "$(uname -s)" = "Darwin" ]; then
+  cd "$(dirname $(python -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$0"))"
+else
+  cd $(dirname $(readlink -f $0))
+fi
+
 
 HASH=$(git rev-parse HEAD)
 BRANCH=$(git rev-parse --abbrev-ref HEAD | tr -d '\r\n')
-TAG=$(git describe --tags --dirty --exclude latest --exclude preview --exclude play-store-release | tr -d '\r\n')
+TAG=$(git describe --tags --dirty --exclude latest --exclude preview --exclude legacy --exclude play-store-release | tr -d '\r\n')
 DATE=$(git log -1 --date=iso8601-strict --format=%cd)
 
 cd $CURDIR

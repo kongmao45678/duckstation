@@ -1,6 +1,8 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/d3d11/shader_cache.h"
-#include "common/d3d11/staging_texture.h"
 #include "common/d3d11/stream_buffer.h"
 #include "common/d3d11/texture.h"
 #include "gpu_hw.h"
@@ -11,20 +13,20 @@
 #include <tuple>
 #include <wrl/client.h>
 
-class GPU_HW_D3D11 : public GPU_HW
+class GPU_HW_D3D11 final : public GPU_HW
 {
 public:
   template<typename T>
   using ComPtr = Microsoft::WRL::ComPtr<T>;
 
-  GPU_HW_D3D11();
+  GPU_HW_D3D11(ID3D11Device* device, ID3D11DeviceContext* context);
   ~GPU_HW_D3D11() override;
 
   GPURenderer GetRendererType() const override;
 
-  bool Initialize(HostDisplay* host_display) override;
+  bool Initialize() override;
   void Reset(bool clear_vram) override;
-  bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display) override;
+  bool DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_display) override;
 
   void ResetGraphicsAPIState() override;
   void RestoreGraphicsAPIState() override;
@@ -94,8 +96,6 @@ private:
   D3D11::StreamBuffer m_uniform_stream_buffer;
 
   D3D11::StreamBuffer m_texture_stream_buffer;
-
-  D3D11::StagingTexture m_vram_readback_texture;
 
   ComPtr<ID3D11ShaderResourceView> m_texture_stream_buffer_srv_r16ui;
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "shader_cache.h"
 #include "../file_system.h"
 #include "../log.h"
@@ -167,7 +170,7 @@ std::string ShaderCache::GetCacheBaseFileName(const std::string_view& base_path,
                                               bool debug)
 {
   std::string base_filename(base_path);
-  base_filename += "d3d_shaders_";
+  base_filename += FS_OSPATH_SEPARATOR_STR "d3d_shaders_";
 
   switch (feature_level)
   {

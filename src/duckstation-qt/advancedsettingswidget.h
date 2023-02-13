@@ -1,10 +1,12 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include <QtCore/QVector>
 #include <QtWidgets/QWidget>
 
 #include "ui_advancedsettingswidget.h"
 
-class QtHostInterface;
 class SettingsDialog;
 
 class AdvancedSettingsWidget : public QWidget
@@ -12,7 +14,7 @@ class AdvancedSettingsWidget : public QWidget
   Q_OBJECT
 
 public:
-  explicit AdvancedSettingsWidget(QtHostInterface* host_interface, QWidget* parent, SettingsDialog* dialog);
+  explicit AdvancedSettingsWidget(SettingsDialog* dialog, QWidget* parent);
   ~AdvancedSettingsWidget();
 
 private:
@@ -45,11 +47,12 @@ private:
     };
   };
 
+  SettingsDialog* m_dialog;
+
   Ui::AdvancedSettingsWidget m_ui;
 
-  void onResetToDefaultClicked();
-
-  QtHostInterface* m_host_interface;
-
   QVector<TweakOption> m_tweak_options;
+
+  void addTweakOptions();
+  void onResetToDefaultClicked();
 };

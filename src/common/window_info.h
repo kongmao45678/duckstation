@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "types.h"
 
@@ -8,13 +11,11 @@ struct WindowInfo
   {
     Surfaceless,
     Win32,
-    WinRT,
     X11,
     Wayland,
     MacOS,
     Android,
     Display,
-    Libretro,
   };
 
   enum class SurfaceFormat
@@ -40,6 +41,9 @@ struct WindowInfo
 #ifdef __APPLE__
   void* surface_handle = nullptr;
 #endif
+
+  // Changes the window to be surfaceless (i.e. no handle/size/etc).
+  void SetSurfaceless();
 
   static bool QueryRefreshRateForWindow(const WindowInfo& wi, float* refresh_rate);
 };

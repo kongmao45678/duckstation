@@ -1,6 +1,9 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "context.h"
 #include "../log.h"
-#include "glad.h"
+#include "loader.h"
 #include <cstdlib>
 #ifdef __APPLE__
 #include <stdlib.h>
@@ -11,7 +14,7 @@ Log_SetChannel(GL::Context);
 
 #if defined(_WIN32) && !defined(_M_ARM64)
 #include "context_wgl.h"
-#elif defined(__APPLE__) && !defined(LIBERTRO)
+#elif defined(__APPLE__)
 #include "context_agl.h"
 #endif
 
@@ -44,7 +47,9 @@ namespace GL {
 
 static bool ShouldPreferESContext()
 {
-#ifndef _MSC_VER
+#if defined(__ANDROID__)
+  return true;
+#elif !defined(_MSC_VER)
   const char* value = std::getenv("PREFER_GLES_CONTEXT");
   return (value && std::strcmp(value, "1") == 0);
 #else
@@ -55,14 +60,38 @@ static bool ShouldPreferESContext()
 #endif
 }
 
-static void DisableBrokenExtensions(const char* gl_vendor, const char* gl_renderer)
+static void DisableBrokenExtensions(const char* gl_vendor, const char* gl_renderer, const char* gl_version)
 {
   if (std::strstr(gl_vendor, "ARM"))
   {
     // GL_{EXT,OES}_copy_image seem to be implemented on the CPU in the Mali drivers...
-    Log_VerbosePrintf("Mali driver detected, disabling GL_{EXT,OES}_copy_image");
-    GLAD_GL_EXT_copy_image = 0;
-    GLAD_GL_OES_copy_image = 0;
+    // Older drivers don't implement timer queries correctly either.
+    int gl_major_version, gl_minor_version, unused_version, major_version, patch_version;
+    if ((std::sscanf(gl_version, "OpenGL ES %d.%d v%d.r%dp%d", &gl_major_version, &gl_minor_version, &unused_version,
+                     &major_version, &patch_version) == 5 &&
+         gl_major_version >= 3 && gl_minor_version >= 2 && major_version >= 32) ||
+        (std::sscanf(gl_version, "OpenGL ES %d.%d v%d.g%dp%d", &gl_major_version, &gl_minor_version, &unused_version,
+                     &major_version, &patch_version) == 5 &&
+         gl_major_version >= 3 && gl_minor_version >= 2 && major_version > 0))
+    {
+      // r32p0 and beyond seem okay.
+      Log_VerbosePrintf("Keeping copy_image for driver version '%s'", gl_version);
+    }
+    else
+    {
+      Log_VerbosePrintf("Older Mali driver detected, disabling GL_{EXT,OES}_copy_image, disjoint_timer_query.");
+      GLAD_GL_EXT_copy_image = 0;
+      GLAD_GL_OES_copy_image = 0;
+      GLAD_GL_EXT_disjoint_timer_query = 0;
+    }
+  }
+
+  // If we're missing GLES 3.2, but have OES_draw_elements_base_vertex, redirect the function pointers.
+  if (!glad_glDrawElementsBaseVertex && GLAD_GL_OES_draw_elements_base_vertex && !GLAD_GL_ES_VERSION_3_2)
+  {
+    glad_glDrawElementsBaseVertex = glad_glDrawElementsBaseVertexOES;
+    glad_glDrawRangeElementsBaseVertex = glad_glDrawRangeElementsBaseVertexOES;
+    glad_glDrawElementsInstancedBaseVertex = glad_glDrawElementsInstancedBaseVertexOES;
   }
 }
 
@@ -111,11 +140,11 @@ std::unique_ptr<GL::Context> Context::Create(const WindowInfo& wi, const Version
   if (wi.type == WindowInfo::Type::X11)
   {
 #ifdef USE_EGL
-    const char* use_egl_x11 = std::getenv("USE_EGL_X11");
-    if (use_egl_x11 && std::strcmp(use_egl_x11, "1") == 0)
-      context = ContextEGLX11::Create(wi, versions_to_try, num_versions_to_try);
-    else
+    const char* use_glx = std::getenv("USE_GLX");
+    if (use_glx && std::strcmp(use_glx, "1") == 0)
       context = ContextGLX::Create(wi, versions_to_try, num_versions_to_try);
+    else
+      context = ContextEGLX11::Create(wi, versions_to_try, num_versions_to_try);
 #else
     context = ContextGLX::Create(wi, versions_to_try, num_versions_to_try);
 #endif
@@ -173,7 +202,7 @@ std::unique_ptr<GL::Context> Context::Create(const WindowInfo& wi, const Version
   Log_InfoPrintf("GL_VERSION: %s", gl_version);
   Log_InfoPrintf("GL_SHADING_LANGUAGE_VERSION: %s", gl_shading_language_version);
 
-  DisableBrokenExtensions(gl_vendor, gl_renderer);
+  DisableBrokenExtensions(gl_vendor, gl_renderer, gl_version);
 
   return context;
 }

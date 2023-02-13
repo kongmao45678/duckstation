@@ -1,7 +1,5 @@
-// Copyright 2016 Dolphin Emulator Project
-// Copyright 2020 DuckStation Emulator Project
-// Licensed under GPLv2+
-// Refer to the LICENSE file included.
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "shader_compiler.h"
 #include "../assert.h"
@@ -124,9 +122,7 @@ bool InitializeGlslang()
     return false;
   }
 
-#ifndef LIBRETRO
   std::atexit([]() { glslang::FinalizeProcess(); });
-#endif
 
   glslang_initialized = true;
   return true;

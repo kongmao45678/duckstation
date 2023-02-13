@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "postprocessing_shader.h"
 #include <string_view>
@@ -12,7 +15,7 @@ public:
   ~PostProcessingChain();
 
   ALWAYS_INLINE bool IsEmpty() const { return m_shaders.empty(); }
-  ALWAYS_INLINE const u32 GetStageCount() const { return static_cast<u32>(m_shaders.size()); }
+  ALWAYS_INLINE u32 GetStageCount() const { return static_cast<u32>(m_shaders.size()); }
   ALWAYS_INLINE const PostProcessingShader& GetShaderStage(u32 i) const { return m_shaders[i]; }
   ALWAYS_INLINE PostProcessingShader& GetShaderStage(u32 i) { return m_shaders[i]; }
 

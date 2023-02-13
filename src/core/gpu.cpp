@@ -1,21 +1,22 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "gpu.h"
 #include "common/file_system.h"
 #include "common/heap_array.h"
 #include "common/log.h"
-#include "common/state_wrapper.h"
 #include "common/string_util.h"
 #include "dma.h"
+#include "host.h"
 #include "host_display.h"
-#include "host_interface.h"
+#include "imgui.h"
 #include "interrupt_controller.h"
 #include "settings.h"
 #include "stb_image_write.h"
 #include "system.h"
 #include "timers.h"
+#include "util/state_wrapper.h"
 #include <cmath>
-#ifdef WITH_IMGUI
-#include "imgui.h"
-#endif
 Log_SetChannel(GPU);
 
 std::unique_ptr<GPU> g_gpu;
@@ -24,11 +25,14 @@ const GPU::GP0CommandHandlerTable GPU::s_GP0_command_handler_table = GPU::Genera
 
 GPU::GPU() = default;
 
-GPU::~GPU() = default;
-
-bool GPU::Initialize(HostDisplay* host_display)
+GPU::~GPU()
 {
-  m_host_display = host_display;
+  if (g_host_display)
+    g_host_display->SetGPUTimingEnabled(false);
+}
+
+bool GPU::Initialize()
+{
   m_force_progressive_scan = g_settings.gpu_disable_interlacing;
   m_force_ntsc_timings = g_settings.gpu_force_ntsc_timings;
   m_crtc_tick_event = TimingEvents::CreateTimingEvent(
@@ -43,6 +47,15 @@ bool GPU::Initialize(HostDisplay* host_display)
   m_max_run_ahead = g_settings.gpu_max_run_ahead;
   m_console_is_pal = System::IsPALRegion();
   UpdateCRTCConfig();
+
+  if (g_settings.display_post_processing && !g_settings.display_post_process_chain.empty() &&
+      !g_host_display->SetPostProcessingChain(g_settings.display_post_process_chain))
+  {
+    Host::AddOSDMessage(Host::TranslateStdString("OSDMessage", "Failed to load post processing shader chain."), 20.0f);
+  }
+
+  g_host_display->SetGPUTimingEnabled(g_settings.display_show_gpu);
+
   return true;
 }
 
@@ -61,6 +74,8 @@ void GPU::UpdateSettings()
 
   // Crop mode calls this, so recalculate the display area
   UpdateCRTCDisplayParameters();
+
+  g_host_display->SetGPUTimingEnabled(g_settings.display_show_gpu);
 }
 
 bool GPU::IsHardwareRenderer()
@@ -151,7 +166,7 @@ void GPU::SoftReset()
   UpdateGPUIdle();
 }
 
-bool GPU::DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display)
+bool GPU::DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_display)
 {
   if (sw.IsReading())
   {
@@ -326,7 +341,7 @@ void GPU::UpdateDMARequest()
       break;
   }
   m_GPUSTAT.dma_data_request = dma_request;
-  g_dma.SetRequest(DMA::Channel::GPU, dma_request);
+  DMA::SetRequest(DMA::Channel::GPU, dma_request);
 }
 
 void GPU::UpdateGPUIdle()
@@ -764,7 +779,7 @@ void GPU::UpdateCRTCTickEvent()
 {
   // figure out how many GPU ticks until the next vblank or event
   TickCount lines_until_event;
-  if (g_timers.IsSyncEnabled(HBLANK_TIMER_INDEX))
+  if (Timers::IsSyncEnabled(HBLANK_TIMER_INDEX))
   {
     // when the timer sync is enabled we need to sync at vblank start and end
     lines_until_event =
@@ -779,14 +794,14 @@ void GPU::UpdateCRTCTickEvent()
          (m_crtc_state.vertical_total - m_crtc_state.current_scanline + m_crtc_state.vertical_display_end) :
          (m_crtc_state.vertical_display_end - m_crtc_state.current_scanline));
   }
-  if (g_timers.IsExternalIRQEnabled(HBLANK_TIMER_INDEX))
-    lines_until_event = std::min(lines_until_event, g_timers.GetTicksUntilIRQ(HBLANK_TIMER_INDEX));
+  if (Timers::IsExternalIRQEnabled(HBLANK_TIMER_INDEX))
+    lines_until_event = std::min(lines_until_event, Timers::GetTicksUntilIRQ(HBLANK_TIMER_INDEX));
 
   TickCount ticks_until_event =
     lines_until_event * m_crtc_state.horizontal_total - m_crtc_state.current_tick_in_scanline;
-  if (g_timers.IsExternalIRQEnabled(DOT_TIMER_INDEX))
+  if (Timers::IsExternalIRQEnabled(DOT_TIMER_INDEX))
   {
-    const TickCount dots_until_irq = g_timers.GetTicksUntilIRQ(DOT_TIMER_INDEX);
+    const TickCount dots_until_irq = Timers::GetTicksUntilIRQ(DOT_TIMER_INDEX);
     const TickCount ticks_until_irq =
       (dots_until_irq * m_crtc_state.dot_clock_divider) - m_crtc_state.fractional_dot_ticks;
     ticks_until_event = std::min(ticks_until_event, std::max<TickCount>(ticks_until_irq, 0));
@@ -820,13 +835,13 @@ void GPU::CRTCTickEvent(TickCount ticks)
     const TickCount gpu_ticks = SystemTicksToCRTCTicks(ticks, &m_crtc_state.fractional_ticks);
     m_crtc_state.current_tick_in_scanline += gpu_ticks;
 
-    if (g_timers.IsUsingExternalClock(DOT_TIMER_INDEX))
+    if (Timers::IsUsingExternalClock(DOT_TIMER_INDEX))
     {
       m_crtc_state.fractional_dot_ticks += gpu_ticks;
       const TickCount dots = m_crtc_state.fractional_dot_ticks / m_crtc_state.dot_clock_divider;
       m_crtc_state.fractional_dot_ticks = m_crtc_state.fractional_dot_ticks % m_crtc_state.dot_clock_divider;
       if (dots > 0)
-        g_timers.AddTicks(DOT_TIMER_INDEX, dots);
+        Timers::AddTicks(DOT_TIMER_INDEX, dots);
     }
   }
 
@@ -836,8 +851,8 @@ void GPU::CRTCTickEvent(TickCount ticks)
     const bool old_hblank = m_crtc_state.in_hblank;
     const bool new_hblank = (m_crtc_state.current_tick_in_scanline >= m_crtc_state.horizontal_sync_start);
     m_crtc_state.in_hblank = new_hblank;
-    if (!old_hblank && new_hblank && g_timers.IsUsingExternalClock(HBLANK_TIMER_INDEX))
-      g_timers.AddTicks(HBLANK_TIMER_INDEX, 1);
+    if (!old_hblank && new_hblank && Timers::IsUsingExternalClock(HBLANK_TIMER_INDEX))
+      Timers::AddTicks(HBLANK_TIMER_INDEX, 1);
 
     UpdateCRTCTickEvent();
     return;
@@ -853,10 +868,10 @@ void GPU::CRTCTickEvent(TickCount ticks)
   const bool old_hblank = m_crtc_state.in_hblank;
   const bool new_hblank = (m_crtc_state.current_tick_in_scanline >= m_crtc_state.horizontal_sync_start);
   m_crtc_state.in_hblank = new_hblank;
-  if (g_timers.IsUsingExternalClock(HBLANK_TIMER_INDEX))
+  if (Timers::IsUsingExternalClock(HBLANK_TIMER_INDEX))
   {
     const u32 hblank_timer_ticks = BoolToUInt32(!old_hblank) + BoolToUInt32(new_hblank) + (lines_to_draw - 1);
-    g_timers.AddTicks(HBLANK_TIMER_INDEX, static_cast<TickCount>(hblank_timer_ticks));
+    Timers::AddTicks(HBLANK_TIMER_INDEX, static_cast<TickCount>(hblank_timer_ticks));
   }
 
   while (lines_to_draw > 0)
@@ -872,7 +887,7 @@ void GPU::CRTCTickEvent(TickCount ticks)
     if (prev_scanline < m_crtc_state.vertical_display_start &&
         m_crtc_state.current_scanline >= m_crtc_state.vertical_display_end)
     {
-      g_timers.SetGate(HBLANK_TIMER_INDEX, false);
+      Timers::SetGate(HBLANK_TIMER_INDEX, false);
       m_crtc_state.in_vblank = false;
     }
 
@@ -883,7 +898,7 @@ void GPU::CRTCTickEvent(TickCount ticks)
       if (new_vblank)
       {
         Log_DebugPrintf("Now in v-blank");
-        g_interrupt_controller.InterruptRequest(InterruptController::IRQ::VBLANK);
+        InterruptController::InterruptRequest(InterruptController::IRQ::VBLANK);
 
         // flush any pending draws and "scan out" the image
         FlushRender();
@@ -897,7 +912,7 @@ void GPU::CRTCTickEvent(TickCount ticks)
           m_crtc_state.interlaced_display_field = 0;
       }
 
-      g_timers.SetGate(HBLANK_TIMER_INDEX, new_vblank);
+      Timers::SetGate(HBLANK_TIMER_INDEX, new_vblank);
       m_crtc_state.in_vblank = new_vblank;
     }
 
@@ -964,9 +979,8 @@ void GPU::UpdateCommandTickEvent()
 bool GPU::ConvertScreenCoordinatesToBeamTicksAndLines(s32 window_x, s32 window_y, float x_scale, u32* out_tick,
                                                       u32* out_line) const
 {
-  auto [display_x, display_y] = m_host_display->ConvertWindowCoordinatesToDisplayCoordinates(
-    window_x, window_y, m_host_display->GetWindowWidth(), m_host_display->GetWindowHeight(),
-    m_host_display->GetDisplayTopMargin());
+  auto [display_x, display_y] = g_host_display->ConvertWindowCoordinatesToDisplayCoordinates(
+    window_x, window_y, g_host_display->GetWindowWidth(), g_host_display->GetWindowHeight());
 
   if (x_scale != 1.0f)
   {
@@ -1553,8 +1567,7 @@ bool GPU::DumpVRAMToFile(const char* filename, u32 width, u32 height, u32 stride
 
 void GPU::DrawDebugStateWindow()
 {
-#ifdef WITH_IMGUI
-  const float framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale.x;
+  const float framebuffer_scale = Host::GetOSDScale();
 
   ImGui::SetNextWindowSize(ImVec2(450.0f * framebuffer_scale, 550.0f * framebuffer_scale), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin("GPU", nullptr))
@@ -1671,7 +1684,6 @@ void GPU::DrawDebugStateWindow()
   }
 
   ImGui::End();
-#endif
 }
 
 void GPU::DrawRendererStats(bool is_idle_frame) {}

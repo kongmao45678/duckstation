@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "common/align.h"
 #include "common/assert.h"
 #include "common/log.h"
@@ -317,9 +320,11 @@ void CodeGenerator::EmitSignExtend(HostReg to_reg, RegSize to_size, HostReg from
       }
     }
     break;
-  }
 
-  Panic("Unknown sign-extend combination");
+    default:
+      Panic("Unknown sign-extend combination");
+      break;
+  }
 }
 
 void CodeGenerator::EmitZeroExtend(HostReg to_reg, RegSize to_size, HostReg from_reg, RegSize from_size)

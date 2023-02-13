@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/bitfield.h"
 #include "cpu_types.h"
@@ -191,5 +194,15 @@ bool AddStepOverBreakpoint();
 bool AddStepOutBreakpoint(u32 max_instructions_to_search = 1000);
 
 extern bool TRACE_EXECUTION;
+
+// Debug register introspection
+struct DebuggerRegisterListEntry
+{
+  const char* name;
+  u32* value_ptr;
+};
+
+static constexpr u32 NUM_DEBUGGER_REGISTER_LIST_ENTRIES = 104;
+extern const std::array<DebuggerRegisterListEntry, NUM_DEBUGGER_REGISTER_LIST_ENTRIES> g_debugger_register_list;
 
 } // namespace CPU

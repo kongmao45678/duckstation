@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "util.h"
 #include "../assert.h"
 #include "../log.h"
@@ -10,6 +13,52 @@
 Log_SetChannel(D3D12);
 
 namespace D3D12 {
+
+void ResourceBarrier(ID3D12GraphicsCommandList* cmdlist, ID3D12Resource* resource, D3D12_RESOURCE_STATES from_state,
+                     D3D12_RESOURCE_STATES to_state)
+{
+  const D3D12_RESOURCE_BARRIER barrier = {D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                                          D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                                          {{resource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, from_state, to_state}}};
+  cmdlist->ResourceBarrier(1, &barrier);
+}
+
+void SetViewport(ID3D12GraphicsCommandList* cmdlist, int x, int y, int width, int height, float min_depth /*= 0.0f*/,
+                 float max_depth /*= 1.0f*/)
+{
+  const D3D12_VIEWPORT vp{static_cast<float>(x),
+                          static_cast<float>(y),
+                          static_cast<float>(width),
+                          static_cast<float>(height),
+                          min_depth,
+                          max_depth};
+  cmdlist->RSSetViewports(1, &vp);
+}
+
+void SetScissor(ID3D12GraphicsCommandList* cmdlist, int x, int y, int width, int height)
+{
+  const D3D12_RECT r{x, y, x + width, y + height};
+  cmdlist->RSSetScissorRects(1, &r);
+}
+
+void SetViewportAndScissor(ID3D12GraphicsCommandList* cmdlist, int x, int y, int width, int height,
+                           float min_depth /*= 0.0f*/, float max_depth /*= 1.0f*/)
+{
+  SetViewport(cmdlist, x, y, width, height, min_depth, max_depth);
+  SetScissor(cmdlist, x, y, width, height);
+}
+
+void SetViewportAndClampScissor(ID3D12GraphicsCommandList* cmdlist, int x, int y, int width, int height,
+                                float min_depth /*= 0.0f*/, float max_depth /*= 1.0f*/)
+{
+  SetViewport(cmdlist, x, y, width, height, min_depth, max_depth);
+
+  const int cx = std::max(x, 0);
+  const int cy = std::max(y, 0);
+  const int cwidth = width - (cx - x);
+  const int cheight = height - (cy - y);
+  SetScissor(cmdlist, cx, cy, cwidth, cheight);
+}
 
 u32 GetTexelSize(DXGI_FORMAT format)
 {
@@ -194,7 +243,7 @@ void GraphicsPipelineBuilder::SetNoCullRasterizationState()
 void GraphicsPipelineBuilder::SetDepthState(bool depth_test, bool depth_write, D3D12_COMPARISON_FUNC compare_op)
 {
   m_desc.DepthStencilState.DepthEnable = depth_test;
-  m_desc.DepthStencilState.DepthWriteMask = depth_test ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
+  m_desc.DepthStencilState.DepthWriteMask = depth_write ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
   m_desc.DepthStencilState.DepthFunc = compare_op;
 }
 

@@ -1,23 +1,27 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "bus.h"
 #include "cdrom.h"
 #include "common/align.h"
 #include "common/assert.h"
 #include "common/log.h"
 #include "common/make_array.h"
-#include "common/state_wrapper.h"
 #include "cpu_code_cache.h"
 #include "cpu_core.h"
 #include "cpu_core_private.h"
 #include "cpu_disasm.h"
 #include "dma.h"
 #include "gpu.h"
-#include "host_interface.h"
+#include "host.h"
 #include "interrupt_controller.h"
 #include "mdec.h"
 #include "pad.h"
+#include "settings.h"
 #include "sio.h"
 #include "spu.h"
 #include "timers.h"
+#include "util/state_wrapper.h"
 #include <cstdio>
 #include <tuple>
 #include <utility>
@@ -78,6 +82,21 @@ u32 g_ram_size = 0;
 u32 g_ram_mask = 0;
 u8 g_bios[BIOS_SIZE]{}; // 512K BIOS ROM
 
+// Exports for external debugger access
+namespace Exports {
+
+extern "C" {
+#ifdef _WIN32
+_declspec(dllexport) uintptr_t RAM;
+_declspec(dllexport) u32 RAM_SIZE, RAM_MASK;
+#else
+__attribute__((visibility("default"), used)) uintptr_t RAM;
+__attribute__((visibility("default"), used)) u32 RAM_SIZE, RAM_MASK;
+#endif
+}
+
+} // namespace Exports
+
 static std::array<TickCount, 3> m_exp1_access_time = {};
 static std::array<TickCount, 3> m_exp2_access_time = {};
 static std::array<TickCount, 3> m_bios_access_time = {};
@@ -130,7 +149,7 @@ bool Initialize()
 {
   if (!AllocateMemory(g_settings.enable_8mb_ram))
   {
-    g_host_interface->ReportError("Failed to allocate memory");
+    Host::ReportErrorAsync("Error", "Failed to allocate memory");
     return false;
   }
 
@@ -293,6 +312,10 @@ bool AllocateMemory(bool enable_8mb_ram)
   g_ram_size = ram_size;
   m_ram_code_page_count = enable_8mb_ram ? RAM_8MB_CODE_PAGE_COUNT : RAM_2MB_CODE_PAGE_COUNT;
 
+  Exports::RAM = reinterpret_cast<uintptr_t>(g_ram);
+  Exports::RAM_SIZE = g_ram_size;
+  Exports::RAM_MASK = g_ram_mask;
+
   Log_InfoPrintf("RAM is %u bytes at %p", g_ram_size, g_ram);
   return true;
 }
@@ -305,6 +328,10 @@ void ReleaseMemory()
     g_ram = nullptr;
     g_ram_mask = 0;
     g_ram_size = 0;
+
+    Exports::RAM = 0;
+    Exports::RAM_SIZE = 0;
+    Exports::RAM_MASK = 0;
   }
 
   m_memory_arena.Destroy();
@@ -1083,13 +1110,13 @@ ALWAYS_INLINE static TickCount DoPadAccess(u32 offset, u32& value)
 {
   if constexpr (type == MemoryAccessType::Read)
   {
-    value = g_pad.ReadRegister(FIXUP_HALFWORD_OFFSET(size, offset));
+    value = Pad::ReadRegister(FIXUP_HALFWORD_OFFSET(size, offset));
     value = FIXUP_HALFWORD_READ_VALUE(size, offset, value);
     return 2;
   }
   else
   {
-    g_pad.WriteRegister(FIXUP_HALFWORD_OFFSET(size, offset), FIXUP_HALFWORD_WRITE_VALUE(size, offset, value));
+    Pad::WriteRegister(FIXUP_HALFWORD_OFFSET(size, offset), FIXUP_HALFWORD_WRITE_VALUE(size, offset, value));
     return 0;
   }
 }
@@ -1099,13 +1126,13 @@ ALWAYS_INLINE static TickCount DoSIOAccess(u32 offset, u32& value)
 {
   if constexpr (type == MemoryAccessType::Read)
   {
-    value = g_sio.ReadRegister(FIXUP_HALFWORD_OFFSET(size, offset));
+    value = SIO::ReadRegister(FIXUP_HALFWORD_OFFSET(size, offset));
     value = FIXUP_HALFWORD_READ_VALUE(size, offset, value);
     return 2;
   }
   else
   {
-    g_sio.WriteRegister(FIXUP_HALFWORD_OFFSET(size, offset), FIXUP_HALFWORD_WRITE_VALUE(size, offset, value));
+    SIO::WriteRegister(FIXUP_HALFWORD_OFFSET(size, offset), FIXUP_HALFWORD_WRITE_VALUE(size, offset, value));
     return 0;
   }
 }
@@ -1119,23 +1146,23 @@ ALWAYS_INLINE static TickCount DoCDROMAccess(u32 offset, u32& value)
     {
       case MemoryAccessSize::Word:
       {
-        const u32 b0 = ZeroExtend32(g_cdrom.ReadRegister(offset));
-        const u32 b1 = ZeroExtend32(g_cdrom.ReadRegister(offset + 1u));
-        const u32 b2 = ZeroExtend32(g_cdrom.ReadRegister(offset + 2u));
-        const u32 b3 = ZeroExtend32(g_cdrom.ReadRegister(offset + 3u));
+        const u32 b0 = ZeroExtend32(CDROM::ReadRegister(offset));
+        const u32 b1 = ZeroExtend32(CDROM::ReadRegister(offset + 1u));
+        const u32 b2 = ZeroExtend32(CDROM::ReadRegister(offset + 2u));
+        const u32 b3 = ZeroExtend32(CDROM::ReadRegister(offset + 3u));
         value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
       }
 
       case MemoryAccessSize::HalfWord:
       {
-        const u32 lsb = ZeroExtend32(g_cdrom.ReadRegister(offset));
-        const u32 msb = ZeroExtend32(g_cdrom.ReadRegister(offset + 1u));
+        const u32 lsb = ZeroExtend32(CDROM::ReadRegister(offset));
+        const u32 msb = ZeroExtend32(CDROM::ReadRegister(offset + 1u));
         value = lsb | (msb << 8);
       }
 
       case MemoryAccessSize::Byte:
       default:
-        value = ZeroExtend32(g_cdrom.ReadRegister(offset));
+        value = ZeroExtend32(CDROM::ReadRegister(offset));
     }
 
     return m_cdrom_access_time[static_cast<u32>(size)];
@@ -1146,23 +1173,23 @@ ALWAYS_INLINE static TickCount DoCDROMAccess(u32 offset, u32& value)
     {
       case MemoryAccessSize::Word:
       {
-        g_cdrom.WriteRegister(offset, Truncate8(value & 0xFFu));
-        g_cdrom.WriteRegister(offset + 1u, Truncate8((value >> 8) & 0xFFu));
-        g_cdrom.WriteRegister(offset + 2u, Truncate8((value >> 16) & 0xFFu));
-        g_cdrom.WriteRegister(offset + 3u, Truncate8((value >> 24) & 0xFFu));
+        CDROM::WriteRegister(offset, Truncate8(value & 0xFFu));
+        CDROM::WriteRegister(offset + 1u, Truncate8((value >> 8) & 0xFFu));
+        CDROM::WriteRegister(offset + 2u, Truncate8((value >> 16) & 0xFFu));
+        CDROM::WriteRegister(offset + 3u, Truncate8((value >> 24) & 0xFFu));
       }
       break;
 
       case MemoryAccessSize::HalfWord:
       {
-        g_cdrom.WriteRegister(offset, Truncate8(value & 0xFFu));
-        g_cdrom.WriteRegister(offset + 1u, Truncate8((value >> 8) & 0xFFu));
+        CDROM::WriteRegister(offset, Truncate8(value & 0xFFu));
+        CDROM::WriteRegister(offset + 1u, Truncate8((value >> 8) & 0xFFu));
       }
       break;
 
       case MemoryAccessSize::Byte:
       default:
-        g_cdrom.WriteRegister(offset, Truncate8(value));
+        CDROM::WriteRegister(offset, Truncate8(value));
         break;
     }
 
@@ -1191,13 +1218,13 @@ ALWAYS_INLINE static TickCount DoMDECAccess(u32 offset, u32& value)
 {
   if constexpr (type == MemoryAccessType::Read)
   {
-    value = g_mdec.ReadRegister(FIXUP_WORD_OFFSET(size, offset));
+    value = MDEC::ReadRegister(FIXUP_WORD_OFFSET(size, offset));
     value = FIXUP_WORD_READ_VALUE(size, offset, value);
     return 2;
   }
   else
   {
-    g_mdec.WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
+    MDEC::WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
     return 0;
   }
 }
@@ -1207,13 +1234,13 @@ ALWAYS_INLINE static TickCount DoAccessInterruptController(u32 offset, u32& valu
 {
   if constexpr (type == MemoryAccessType::Read)
   {
-    value = g_interrupt_controller.ReadRegister(FIXUP_WORD_OFFSET(size, offset));
+    value = InterruptController::ReadRegister(FIXUP_WORD_OFFSET(size, offset));
     value = FIXUP_WORD_READ_VALUE(size, offset, value);
     return 2;
   }
   else
   {
-    g_interrupt_controller.WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
+    InterruptController::WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
     return 0;
   }
 }
@@ -1223,13 +1250,13 @@ ALWAYS_INLINE static TickCount DoAccessTimers(u32 offset, u32& value)
 {
   if constexpr (type == MemoryAccessType::Read)
   {
-    value = g_timers.ReadRegister(FIXUP_WORD_OFFSET(size, offset));
+    value = Timers::ReadRegister(FIXUP_WORD_OFFSET(size, offset));
     value = FIXUP_WORD_READ_VALUE(size, offset, value);
     return 2;
   }
   else
   {
-    g_timers.WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
+    Timers::WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
     return 0;
   }
 }
@@ -1244,22 +1271,22 @@ ALWAYS_INLINE static TickCount DoAccessSPU(u32 offset, u32& value)
       case MemoryAccessSize::Word:
       {
         // 32-bit reads are read as two 16-bit accesses.
-        const u16 lsb = g_spu.ReadRegister(offset);
-        const u16 msb = g_spu.ReadRegister(offset + 2);
+        const u16 lsb = SPU::ReadRegister(offset);
+        const u16 msb = SPU::ReadRegister(offset + 2);
         value = ZeroExtend32(lsb) | (ZeroExtend32(msb) << 16);
       }
       break;
 
       case MemoryAccessSize::HalfWord:
       {
-        value = ZeroExtend32(g_spu.ReadRegister(offset));
+        value = ZeroExtend32(SPU::ReadRegister(offset));
       }
       break;
 
       case MemoryAccessSize::Byte:
       default:
       {
-        const u16 value16 = g_spu.ReadRegister(FIXUP_HALFWORD_OFFSET(size, offset));
+        const u16 value16 = SPU::ReadRegister(FIXUP_HALFWORD_OFFSET(size, offset));
         value = FIXUP_HALFWORD_READ_VALUE(size, offset, value16);
       }
       break;
@@ -1276,22 +1303,22 @@ ALWAYS_INLINE static TickCount DoAccessSPU(u32 offset, u32& value)
       case MemoryAccessSize::Word:
       {
         DebugAssert(Common::IsAlignedPow2(offset, 2));
-        g_spu.WriteRegister(offset, Truncate16(value));
-        g_spu.WriteRegister(offset + 2, Truncate16(value >> 16));
+        SPU::WriteRegister(offset, Truncate16(value));
+        SPU::WriteRegister(offset + 2, Truncate16(value >> 16));
         break;
       }
 
       case MemoryAccessSize::HalfWord:
       {
         DebugAssert(Common::IsAlignedPow2(offset, 2));
-        g_spu.WriteRegister(offset, Truncate16(value));
+        SPU::WriteRegister(offset, Truncate16(value));
         break;
       }
 
       case MemoryAccessSize::Byte:
       {
-        g_spu.WriteRegister(FIXUP_HALFWORD_OFFSET(size, offset),
-                            Truncate16(FIXUP_HALFWORD_READ_VALUE(size, offset, value)));
+        SPU::WriteRegister(FIXUP_HALFWORD_OFFSET(size, offset),
+                           Truncate16(FIXUP_HALFWORD_READ_VALUE(size, offset, value)));
         break;
       }
     }
@@ -1305,13 +1332,13 @@ ALWAYS_INLINE static TickCount DoDMAAccess(u32 offset, u32& value)
 {
   if constexpr (type == MemoryAccessType::Read)
   {
-    value = g_dma.ReadRegister(FIXUP_WORD_OFFSET(size, offset));
+    value = DMA::ReadRegister(FIXUP_WORD_OFFSET(size, offset));
     value = FIXUP_WORD_READ_VALUE(size, offset, value);
     return 2;
   }
   else
   {
-    g_dma.WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
+    DMA::WriteRegister(FIXUP_WORD_OFFSET(size, offset), FIXUP_WORD_WRITE_VALUE(size, offset, value));
     return 0;
   }
 }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "shader_cache.h"
 #include "../assert.h"
 #include "../file_system.h"
@@ -356,7 +359,7 @@ bool ShaderCache::FlushPipelineCache()
 
   // Save disk writes if it hasn't changed, think of the poor SSDs.
   FILESYSTEM_STAT_DATA sd;
-  if (!FileSystem::StatFile(m_pipeline_cache_filename.c_str(), &sd) || sd.Size != static_cast<u64>(data_size))
+  if (!FileSystem::StatFile(m_pipeline_cache_filename.c_str(), &sd) || sd.Size != static_cast<s64>(data_size))
   {
     Log_InfoPrintf("Writing %zu bytes to '%s'", data_size, m_pipeline_cache_filename.c_str());
     if (!FileSystem::WriteBinaryFile(m_pipeline_cache_filename.c_str(), data.data(), data.size()))
@@ -386,7 +389,7 @@ void ShaderCache::ClosePipelineCache()
 std::string ShaderCache::GetShaderCacheBaseFileName(const std::string_view& base_path, bool debug)
 {
   std::string base_filename(base_path);
-  base_filename += "vulkan_shaders";
+  base_filename += FS_OSPATH_SEPARATOR_STR "vulkan_shaders";
 
   if (debug)
     base_filename += "_debug";
@@ -397,7 +400,7 @@ std::string ShaderCache::GetShaderCacheBaseFileName(const std::string_view& base
 std::string ShaderCache::GetPipelineCacheBaseFileName(const std::string_view& base_path, bool debug)
 {
   std::string base_filename(base_path);
-  base_filename += "vulkan_pipelines";
+  base_filename += FS_OSPATH_SEPARATOR_STR "vulkan_pipelines";
 
   if (debug)
     base_filename += "_debug";

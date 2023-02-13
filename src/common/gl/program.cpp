@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "program.h"
 #include "../assert.h"
 #include "../log.h"
@@ -164,7 +167,7 @@ bool Program::GetBinary(std::vector<u8>* out_data, u32* out_data_format)
   }
 
   *out_data_format = static_cast<u32>(format);
-  Log_InfoPrintf("Program binary retrieved, %zu bytes, format %u", out_data->size(), *out_data_format);
+  Log_DevPrintf("Program binary retrieved, %zu bytes, format %u", out_data->size(), *out_data_format);
   return true;
 }
 

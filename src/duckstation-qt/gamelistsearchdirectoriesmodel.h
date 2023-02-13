@@ -1,16 +1,19 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include <QtCore/QAbstractTableModel>
 #include <QtCore/QString>
 #include <vector>
 
-class QtHostInterface;
+class EmuThread;
 
 class GameListSearchDirectoriesModel : public QAbstractTableModel
 {
   Q_OBJECT
 
 public:
-  GameListSearchDirectoriesModel(QtHostInterface* host_interface);
+  GameListSearchDirectoriesModel(EmuThread* host_interface);
   ~GameListSearchDirectoriesModel();
 
   int columnCount(const QModelIndex& parent) const override;
@@ -36,6 +39,6 @@ private:
     bool recursive;
   };
 
-  QtHostInterface* m_host_interface;
+  EmuThread* m_host_interface;
   std::vector<Entry> m_entries;
 };

@@ -1,10 +1,13 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "timing_event.h"
 #include "common/assert.h"
 #include "common/log.h"
-#include "common/state_wrapper.h"
 #include "cpu_core.h"
 #include "cpu_core_private.h"
 #include "system.h"
+#include "util/state_wrapper.h"
 Log_SetChannel(TimingEvents);
 
 namespace TimingEvents {

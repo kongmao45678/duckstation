@@ -1,9 +1,12 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "bus.h"
 #include "common/bitfield.h"
-#include "common/jit_code_buffer.h"
-#include "common/page_fault_handler.h"
 #include "cpu_types.h"
+#include "util/jit_code_buffer.h"
+#include "util/page_fault_handler.h"
 #include <array>
 #include <map>
 #include <memory>
@@ -94,13 +97,10 @@ struct CodeBlock
   u32 recompile_count = 0;
   u32 invalidate_frame_number = 0;
 
-  const u32 GetPC() const { return key.GetPC(); }
-  const u32 GetSizeInBytes() const { return static_cast<u32>(instructions.size()) * sizeof(Instruction); }
-  const u32 GetStartPageIndex() const { return (key.GetPCPhysicalAddress() / HOST_PAGE_SIZE); }
-  const u32 GetEndPageIndex() const
-  {
-    return ((key.GetPCPhysicalAddress() + GetSizeInBytes()) / HOST_PAGE_SIZE);
-  }
+  u32 GetPC() const { return key.GetPC(); }
+  u32 GetSizeInBytes() const { return static_cast<u32>(instructions.size()) * sizeof(Instruction); }
+  u32 GetStartPageIndex() const { return (key.GetPCPhysicalAddress() / HOST_PAGE_SIZE); }
+  u32 GetEndPageIndex() const { return ((key.GetPCPhysicalAddress() + GetSizeInBytes()) / HOST_PAGE_SIZE); }
   bool IsInRAM() const
   {
     // TODO: Constant
@@ -125,7 +125,7 @@ void Execute();
 
 #ifdef WITH_RECOMPILER
 using DispatcherFunction = void (*)();
-using SingleBlockDispatcherFunction = void(*)(const CodeBlock::HostCodePointer);
+using SingleBlockDispatcherFunction = void (*)(const CodeBlock::HostCodePointer);
 
 FastMapTable* GetFastMapPointer();
 void ExecuteRecompiler();
@@ -139,6 +139,9 @@ void Reinitialize();
 
 /// Invalidates all blocks which are in the range of the specified code page.
 void InvalidateBlocksWithPageIndex(u32 page_index);
+
+/// Invalidates all blocks in the cache.
+void InvalidateAll();
 
 template<PGXPMode pgxp_mode>
 void InterpretCachedBlock(const CodeBlock& block);

@@ -1,8 +1,26 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "window_info.h"
 #include "common/log.h"
 Log_SetChannel(WindowInfo);
 
-#if defined(_WIN32) && !defined(_UWP)
+void WindowInfo::SetSurfaceless()
+{
+  type = Type::Surfaceless;
+  window_handle = nullptr;
+  surface_width = 0;
+  surface_height = 0;
+  surface_refresh_rate = 0.0f;
+  surface_scale = 1.0f;
+  surface_format = SurfaceFormat::None;
+
+#ifdef __APPLE__
+  surface_handle = nullptr;
+#endif
+}
+
+#if defined(_WIN32)
 
 #include "common/windows_headers.h"
 #include <dwmapi.h>
@@ -87,7 +105,7 @@ bool WindowInfo::QueryRefreshRateForWindow(const WindowInfo& wi, float* refresh_
 
 #ifdef USE_X11
 
-#include "common/scope_guard.h"
+#include "common/scoped_guard.h"
 #include "gl/x11_window.h"
 #include <X11/extensions/Xrandr.h>
 
@@ -107,7 +125,7 @@ static bool GetRefreshRateFromXRandR(const WindowInfo& wi, float* refresh_rate)
     return false;
   }
 
-  Common::ScopeGuard res_guard([res]() { XRRFreeScreenResources(res); });
+  ScopedGuard res_guard([res]() { XRRFreeScreenResources(res); });
 
   int num_monitors;
   XRRMonitorInfo* mi = XRRGetMonitors(display, window, True, &num_monitors);
@@ -121,7 +139,7 @@ static bool GetRefreshRateFromXRandR(const WindowInfo& wi, float* refresh_rate)
     Log_WarningPrintf("XRRGetMonitors() returned %d monitors, using first", num_monitors);
   }
 
-  Common::ScopeGuard mi_guard([mi]() { XRRFreeMonitors(mi); });
+  ScopedGuard mi_guard([mi]() { XRRFreeMonitors(mi); });
   if (mi->noutput <= 0)
   {
     Log_ErrorPrint("Monitor has no outputs");
@@ -139,7 +157,7 @@ static bool GetRefreshRateFromXRandR(const WindowInfo& wi, float* refresh_rate)
     return false;
   }
 
-  Common::ScopeGuard oi_guard([oi]() { XRRFreeOutputInfo(oi); });
+  ScopedGuard oi_guard([oi]() { XRRFreeOutputInfo(oi); });
 
   XRRCrtcInfo* ci = XRRGetCrtcInfo(display, res, oi->crtc);
   if (!ci)
@@ -148,7 +166,7 @@ static bool GetRefreshRateFromXRandR(const WindowInfo& wi, float* refresh_rate)
     return false;
   }
 
-  Common::ScopeGuard ci_guard([ci]() { XRRFreeCrtcInfo(ci); });
+  ScopedGuard ci_guard([ci]() { XRRFreeCrtcInfo(ci); });
 
   XRRModeInfo* mode = nullptr;
   for (int i = 0; i < res->nmode; i++)

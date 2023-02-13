@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "context.h"
 #include "glad_glx.h"
@@ -18,6 +21,7 @@ public:
   bool ChangeSurface(const WindowInfo& new_wi) override;
   void ResizeSurface(u32 new_surface_width = 0, u32 new_surface_height = 0) override;
   bool SwapBuffers() override;
+  bool IsCurrent() override;
   bool MakeCurrent() override;
   bool DoneCurrent() override;
   bool SetSwapInterval(s32 interval) override;

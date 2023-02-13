@@ -1,6 +1,8 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/dimensional_array.h"
-#include "common/vulkan/staging_texture.h"
 #include "common/vulkan/stream_buffer.h"
 #include "common/vulkan/texture.h"
 #include "gpu_hw.h"
@@ -9,7 +11,7 @@
 #include <memory>
 #include <tuple>
 
-class GPU_HW_Vulkan : public GPU_HW
+class GPU_HW_Vulkan final : public GPU_HW
 {
 public:
   GPU_HW_Vulkan();
@@ -17,9 +19,9 @@ public:
 
   GPURenderer GetRendererType() const override;
 
-  bool Initialize(HostDisplay* host_display) override;
+  bool Initialize() override;
   void Reset(bool clear_vram) override;
-  bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display) override;
+  bool DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_display) override;
 
   void ResetGraphicsAPIState() override;
   void RestoreGraphicsAPIState() override;
@@ -45,7 +47,6 @@ private:
   enum : u32
   {
     MAX_PUSH_CONSTANTS_SIZE = 64,
-    TEXTURE_REPLACEMENT_BUFFER_SIZE = 64 * 1024 * 1024
   };
   void SetCapabilities();
   void DestroyResources();
@@ -70,8 +71,6 @@ private:
 
   bool CompilePipelines();
   void DestroyPipelines();
-
-  bool CreateTextureReplacementStreamBuffer();
 
   bool BlitVRAMReplacementTexture(const TextureReplacementTexture* tex, u32 dst_x, u32 dst_y, u32 width, u32 height);
 
@@ -100,7 +99,6 @@ private:
   Vulkan::Texture m_vram_depth_texture;
   Vulkan::Texture m_vram_read_texture;
   Vulkan::Texture m_vram_readback_texture;
-  Vulkan::StagingTexture m_vram_readback_staging_texture;
   Vulkan::Texture m_display_texture;
   bool m_use_ssbos_for_vram_writes = false;
 
@@ -144,7 +142,6 @@ private:
 
   // texture replacements
   Vulkan::Texture m_vram_write_replacement_texture;
-  Vulkan::StreamBuffer m_texture_replacment_stream_buffer;
 
   // downsampling
   Vulkan::Texture m_downsample_texture;

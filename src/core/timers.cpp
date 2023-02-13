@@ -1,37 +1,90 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "timers.h"
+#include "common/bitfield.h"
 #include "common/log.h"
-#include "common/state_wrapper.h"
 #include "gpu.h"
+#include "host.h"
+#include "imgui.h"
 #include "interrupt_controller.h"
 #include "system.h"
-#ifdef WITH_IMGUI
-#include "imgui.h"
-#endif
+#include "util/state_wrapper.h"
+#include <array>
+#include <memory>
 Log_SetChannel(Timers);
 
-Timers g_timers;
+namespace Timers {
+static constexpr u32 NUM_TIMERS = 3;
 
-Timers::Timers() = default;
+enum class SyncMode : u8
+{
+  PauseOnGate = 0,
+  ResetOnGate = 1,
+  ResetAndRunOnGate = 2,
+  FreeRunOnGate = 3
+};
 
-Timers::~Timers() = default;
+union CounterMode
+{
+  u32 bits;
+
+  BitField<u32, bool, 0, 1> sync_enable;
+  BitField<u32, SyncMode, 1, 2> sync_mode;
+  BitField<u32, bool, 3, 1> reset_at_target;
+  BitField<u32, bool, 4, 1> irq_at_target;
+  BitField<u32, bool, 5, 1> irq_on_overflow;
+  BitField<u32, bool, 6, 1> irq_repeat;
+  BitField<u32, bool, 7, 1> irq_pulse_n;
+  BitField<u32, u8, 8, 2> clock_source;
+  BitField<u32, bool, 10, 1> interrupt_request_n;
+  BitField<u32, bool, 11, 1> reached_target;
+  BitField<u32, bool, 12, 1> reached_overflow;
+};
+
+struct CounterState
+{
+  CounterMode mode;
+  u32 counter;
+  u32 target;
+  bool gate;
+  bool use_external_clock;
+  bool external_counting_enabled;
+  bool counting_enabled;
+  bool irq_done;
+};
+
+static void UpdateCountingEnabled(CounterState& cs);
+static void CheckForIRQ(u32 index, u32 old_counter);
+static void UpdateIRQ(u32 index);
+
+static void AddSysClkTicks(void*, TickCount sysclk_ticks, TickCount ticks_late);
+
+static TickCount GetTicksUntilNextInterrupt();
+static void UpdateSysClkEvent();
+
+static std::unique_ptr<TimingEvent> s_sysclk_event;
+
+static std::array<CounterState, NUM_TIMERS> s_states{};
+static TickCount s_syclk_ticks_carry = 0; // 0 unless overclocking is enabled
+static u32 s_sysclk_div_8_carry = 0;      // partial ticks for timer 3 with sysclk/8
+};                                        // namespace Timers
 
 void Timers::Initialize()
 {
-  m_sysclk_event = TimingEvents::CreateTimingEvent(
-    "Timer SysClk Interrupt", 1, 1,
-    [](void* param, TickCount ticks, TickCount ticks_late) { static_cast<Timers*>(param)->AddSysClkTicks(ticks); },
-    this, false);
+  s_sysclk_event =
+    TimingEvents::CreateTimingEvent("Timer SysClk Interrupt", 1, 1, &Timers::AddSysClkTicks, nullptr, false);
   Reset();
 }
 
 void Timers::Shutdown()
 {
-  m_sysclk_event.reset();
+  s_sysclk_event.reset();
 }
 
 void Timers::Reset()
 {
-  for (CounterState& cs : m_states)
+  for (CounterState& cs : s_states)
   {
     cs.mode.bits = 0;
     cs.mode.interrupt_request_n = true;
@@ -43,14 +96,14 @@ void Timers::Reset()
     cs.irq_done = false;
   }
 
-  m_syclk_ticks_carry = 0;
-  m_sysclk_div_8_carry = 0;
+  s_syclk_ticks_carry = 0;
+  s_sysclk_div_8_carry = 0;
   UpdateSysClkEvent();
 }
 
 bool Timers::DoState(StateWrapper& sw)
 {
-  for (CounterState& cs : m_states)
+  for (CounterState& cs : s_states)
   {
     sw.Do(&cs.mode.bits);
     sw.Do(&cs.counter);
@@ -62,8 +115,8 @@ bool Timers::DoState(StateWrapper& sw)
     sw.Do(&cs.irq_done);
   }
 
-  sw.Do(&m_syclk_ticks_carry);
-  sw.Do(&m_sysclk_div_8_carry);
+  sw.Do(&s_syclk_ticks_carry);
+  sw.Do(&s_sysclk_div_8_carry);
 
   if (sw.IsReading())
     UpdateSysClkEvent();
@@ -73,12 +126,28 @@ bool Timers::DoState(StateWrapper& sw)
 
 void Timers::CPUClocksChanged()
 {
-  m_syclk_ticks_carry = 0;
+  s_syclk_ticks_carry = 0;
+}
+
+bool Timers::IsUsingExternalClock(u32 timer)
+{
+  return s_states[timer].external_counting_enabled;
+}
+
+bool Timers::IsSyncEnabled(u32 timer)
+{
+  return s_states[timer].mode.sync_enable;
+}
+
+bool Timers::IsExternalIRQEnabled(u32 timer)
+{
+  const CounterState& cs = s_states[timer];
+  return (cs.external_counting_enabled && (cs.mode.bits & ((1u << 4) | (1u << 5))) != 0);
 }
 
 void Timers::SetGate(u32 timer, bool state)
 {
-  CounterState& cs = m_states[timer];
+  CounterState& cs = s_states[timer];
   if (cs.gate == state)
     return;
 
@@ -88,7 +157,7 @@ void Timers::SetGate(u32 timer, bool state)
     return;
 
   if (cs.counting_enabled && !cs.use_external_clock)
-    m_sysclk_event->InvokeEarly();
+    s_sysclk_event->InvokeEarly();
 
   if (state)
   {
@@ -109,9 +178,9 @@ void Timers::SetGate(u32 timer, bool state)
   UpdateSysClkEvent();
 }
 
-TickCount Timers::GetTicksUntilIRQ(u32 timer) const
+TickCount Timers::GetTicksUntilIRQ(u32 timer)
 {
-  const CounterState& cs = m_states[timer];
+  const CounterState& cs = s_states[timer];
   if (!cs.counting_enabled)
     return std::numeric_limits<TickCount>::max();
 
@@ -126,7 +195,7 @@ TickCount Timers::GetTicksUntilIRQ(u32 timer) const
 
 void Timers::AddTicks(u32 timer, TickCount count)
 {
-  CounterState& cs = m_states[timer];
+  CounterState& cs = s_states[timer];
   const u32 old_counter = cs.counter;
   cs.counter += static_cast<u32>(count);
   CheckForIRQ(timer, old_counter);
@@ -134,7 +203,7 @@ void Timers::AddTicks(u32 timer, TickCount count)
 
 void Timers::CheckForIRQ(u32 timer, u32 old_counter)
 {
-  CounterState& cs = m_states[timer];
+  CounterState& cs = s_states[timer];
 
   bool interrupt_request = false;
   if (cs.counter >= cs.target && (old_counter < cs.target || cs.target == 0))
@@ -169,21 +238,21 @@ void Timers::CheckForIRQ(u32 timer, u32 old_counter)
   }
 }
 
-void Timers::AddSysClkTicks(TickCount sysclk_ticks)
+void Timers::AddSysClkTicks(void*, TickCount sysclk_ticks, TickCount ticks_late)
 {
-  sysclk_ticks = System::UnscaleTicksToOverclock(sysclk_ticks, &m_syclk_ticks_carry);
+  sysclk_ticks = System::UnscaleTicksToOverclock(sysclk_ticks, &s_syclk_ticks_carry);
 
-  if (!m_states[0].external_counting_enabled && m_states[0].counting_enabled)
+  if (!s_states[0].external_counting_enabled && s_states[0].counting_enabled)
     AddTicks(0, sysclk_ticks);
-  if (!m_states[1].external_counting_enabled && m_states[1].counting_enabled)
+  if (!s_states[1].external_counting_enabled && s_states[1].counting_enabled)
     AddTicks(1, sysclk_ticks);
-  if (m_states[2].external_counting_enabled)
+  if (s_states[2].external_counting_enabled)
   {
-    TickCount sysclk_div_8_ticks = (sysclk_ticks + m_sysclk_div_8_carry) / 8;
-    m_sysclk_div_8_carry = (sysclk_ticks + m_sysclk_div_8_carry) % 8;
+    TickCount sysclk_div_8_ticks = (sysclk_ticks + s_sysclk_div_8_carry) / 8;
+    s_sysclk_div_8_carry = (sysclk_ticks + s_sysclk_div_8_carry) % 8;
     AddTicks(2, sysclk_div_8_ticks);
   }
-  else if (m_states[2].counting_enabled)
+  else if (s_states[2].counting_enabled)
   {
     AddTicks(2, sysclk_ticks);
   }
@@ -201,7 +270,7 @@ u32 Timers::ReadRegister(u32 offset)
     return UINT32_C(0xFFFFFFFF);
   }
 
-  CounterState& cs = m_states[timer_index];
+  CounterState& cs = s_states[timer_index];
 
   switch (port_offset)
   {
@@ -214,7 +283,7 @@ u32 Timers::ReadRegister(u32 offset)
           g_gpu->SynchronizeCRTC();
       }
 
-      m_sysclk_event->InvokeEarly();
+      s_sysclk_event->InvokeEarly();
 
       return cs.counter;
     }
@@ -228,7 +297,7 @@ u32 Timers::ReadRegister(u32 offset)
           g_gpu->SynchronizeCRTC();
       }
 
-      m_sysclk_event->InvokeEarly();
+      s_sysclk_event->InvokeEarly();
 
       const u32 bits = cs.mode.bits;
       cs.mode.reached_overflow = false;
@@ -255,7 +324,7 @@ void Timers::WriteRegister(u32 offset, u32 value)
     return;
   }
 
-  CounterState& cs = m_states[timer_index];
+  CounterState& cs = s_states[timer_index];
 
   if (timer_index < 2 && cs.external_counting_enabled)
   {
@@ -264,7 +333,7 @@ void Timers::WriteRegister(u32 offset, u32 value)
       g_gpu->SynchronizeCRTC();
   }
 
-  m_sysclk_event->InvokeEarly();
+  s_sysclk_event->InvokeEarly();
 
   // Strictly speaking these IRQ checks should probably happen on the next tick.
   switch (port_offset)
@@ -343,22 +412,22 @@ void Timers::UpdateCountingEnabled(CounterState& cs)
 
 void Timers::UpdateIRQ(u32 index)
 {
-  CounterState& cs = m_states[index];
+  CounterState& cs = s_states[index];
   if (cs.mode.interrupt_request_n || (!cs.mode.irq_repeat && cs.irq_done))
     return;
 
   Log_DebugPrintf("Raising timer %u IRQ", index);
   cs.irq_done = true;
-  g_interrupt_controller.InterruptRequest(
+  InterruptController::InterruptRequest(
     static_cast<InterruptController::IRQ>(static_cast<u32>(InterruptController::IRQ::TMR0) + index));
 }
 
-TickCount Timers::GetTicksUntilNextInterrupt() const
+TickCount Timers::GetTicksUntilNextInterrupt()
 {
   TickCount min_ticks = System::GetMaxSliceTicks();
   for (u32 i = 0; i < NUM_TIMERS; i++)
   {
-    const CounterState& cs = m_states[i];
+    const CounterState& cs = s_states[i];
     if (!cs.counting_enabled || (i < 2 && cs.external_counting_enabled) ||
         (!cs.mode.irq_at_target && !cs.mode.irq_on_overflow && (cs.mode.irq_repeat || !cs.irq_done)))
     {
@@ -389,12 +458,11 @@ TickCount Timers::GetTicksUntilNextInterrupt() const
 
 void Timers::UpdateSysClkEvent()
 {
-  m_sysclk_event->Schedule(GetTicksUntilNextInterrupt());
+  s_sysclk_event->Schedule(GetTicksUntilNextInterrupt());
 }
 
 void Timers::DrawDebugStateWindow()
 {
-#ifdef WITH_IMGUI
   static constexpr u32 NUM_COLUMNS = 10;
   static constexpr std::array<const char*, NUM_COLUMNS> column_names = {
     {"#", "Value", "Target", "Sync", "Reset", "IRQ", "IRQRepeat", "IRQToggle", "Clock Source", "Reached"}};
@@ -405,7 +473,7 @@ void Timers::DrawDebugStateWindow()
      {{"SysClk", "HBlank", "SysClk", "HBlank"}},
      {{"SysClk", "DotClk", "SysClk/8", "SysClk/8"}}}};
 
-  const float framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale.x;
+  const float framebuffer_scale = Host::GetOSDScale();
 
   ImGui::SetNextWindowSize(ImVec2(800.0f * framebuffer_scale, 100.0f * framebuffer_scale), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin("Timer State", nullptr))
@@ -434,7 +502,7 @@ void Timers::DrawDebugStateWindow()
 
   for (u32 i = 0; i < NUM_TIMERS; i++)
   {
-    const CounterState& cs = m_states[i];
+    const CounterState& cs = s_states[i];
     ImGui::PushStyleColor(ImGuiCol_Text,
                           cs.counting_enabled ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f) : ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
     ImGui::Text("%u", i);
@@ -463,5 +531,4 @@ void Timers::DrawDebugStateWindow()
 
   ImGui::Columns(1);
   ImGui::End();
-#endif
 }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "cdrom_async_reader.h"
 #include "common/assert.h"
 #include "common/log.h"
@@ -55,6 +58,45 @@ std::unique_ptr<CDImage> CDROMAsyncReader::RemoveMedia()
     CancelReadahead();
 
   return std::move(m_media);
+}
+
+bool CDROMAsyncReader::Precache(ProgressCallback* callback)
+{
+  WaitForIdle();
+
+  std::unique_lock lock(m_mutex);
+  if (!m_media)
+    return false;
+  else if (m_media->IsPrecached())
+    return true;
+
+  EmptyBuffers();
+
+  const CDImage::PrecacheResult res = m_media->Precache(callback);
+  if (res == CDImage::PrecacheResult::Unsupported)
+  {
+    // fall back to copy precaching
+    std::unique_ptr<CDImage> memory_image = CDImage::CreateMemoryImage(m_media.get(), callback);
+    if (memory_image)
+    {
+      const CDImage::LBA lba = m_media->GetPositionOnDisc();
+      if (!memory_image->Seek(lba))
+      {
+        Log_ErrorPrintf("Failed to seek to LBA %u in memory image", lba);
+        return false;
+      }
+
+      m_media.reset();
+      m_media = std::move(memory_image);
+      return true;
+    }
+    else
+    {
+      return false;
+    }
+  }
+
+  return (res == CDImage::PrecacheResult::Success);
 }
 
 void CDROMAsyncReader::QueueReadSector(CDImage::LBA lba)

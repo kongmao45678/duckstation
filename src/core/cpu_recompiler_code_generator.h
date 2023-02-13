@@ -1,10 +1,13 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include <array>
 #include <initializer_list>
 #include <utility>
 #include <vector>
 
-#include "common/jit_code_buffer.h"
+#include "util/jit_code_buffer.h"
 
 #include "cpu_code_cache.h"
 #include "cpu_recompiler_register_cache.h"

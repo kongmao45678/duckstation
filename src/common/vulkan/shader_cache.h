@@ -1,8 +1,11 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "../hash_combine.h"
 #include "../types.h"
+#include "loader.h"
 #include "shader_compiler.h"
-#include "vulkan_loader.h"
 #include <cstdio>
 #include <memory>
 #include <optional>

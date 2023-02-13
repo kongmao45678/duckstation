@@ -1,11 +1,13 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include <string>
 #include <QtWidgets/QWidget>
 
 #include "ui_gamelistsettingswidget.h"
 
-class QtHostInterface;
-
+class SettingsDialog;
 class GameListSearchDirectoriesModel;
 
 class GameListSettingsWidget : public QWidget
@@ -13,7 +15,7 @@ class GameListSettingsWidget : public QWidget
   Q_OBJECT
 
 public:
-  GameListSettingsWidget(QtHostInterface* host_interface, QWidget* parent = nullptr);
+  GameListSettingsWidget(SettingsDialog* dialog, QWidget* parent);
   ~GameListSettingsWidget();
 
   bool addExcludedPath(const std::string& path);
@@ -36,8 +38,6 @@ protected:
   void resizeEvent(QResizeEvent* event);
 
 private:
-  QtHostInterface* m_host_interface;
-
   Ui::GameListSettingsWidget m_ui;
 
   GameListSearchDirectoriesModel* m_search_directories_model = nullptr;

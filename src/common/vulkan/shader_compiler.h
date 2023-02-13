@@ -1,7 +1,5 @@
-// Copyright 2016 Dolphin Emulator Project
-// Copyright 2020 DuckStation Emulator Project
-// Licensed under GPLv2+
-// Refer to the LICENSE file included.
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
 

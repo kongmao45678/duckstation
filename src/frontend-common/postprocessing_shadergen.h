@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "core/shadergen.h"
 #include "postprocessing_shader.h"
@@ -8,7 +11,7 @@ namespace FrontendCommon {
 class PostProcessingShaderGen : public ShaderGen
 {
 public:
-  PostProcessingShaderGen(HostDisplay::RenderAPI render_api, bool supports_dual_source_blend);
+  PostProcessingShaderGen(RenderAPI render_api, bool supports_dual_source_blend);
   ~PostProcessingShaderGen();
 
   std::string GeneratePostProcessingVertexShader(const PostProcessingShader& shader);

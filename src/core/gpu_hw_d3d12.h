@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/d3d12/staging_texture.h"
 #include "common/d3d12/stream_buffer.h"
@@ -9,7 +12,7 @@
 #include <memory>
 #include <tuple>
 
-class GPU_HW_D3D12 : public GPU_HW
+class GPU_HW_D3D12 final : public GPU_HW
 {
 public:
   template<typename T>
@@ -20,7 +23,7 @@ public:
 
   GPURenderer GetRendererType() const override;
 
-  bool Initialize(HostDisplay* host_display) override;
+  bool Initialize() override;
   void Reset(bool clear_vram) override;
 
   void ResetGraphicsAPIState() override;

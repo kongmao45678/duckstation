@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 #include "common/heap_array.h"
 #include "gpu.h"
@@ -33,9 +36,11 @@ public:
   GPU_HW();
   virtual ~GPU_HW();
 
-  virtual bool Initialize(HostDisplay* host_display) override;
+  const Threading::Thread* GetSWThread() const override;
+
+  virtual bool Initialize() override;
   virtual void Reset(bool clear_vram) override;
-  virtual bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display) override;
+  virtual bool DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_display) override;
 
   void UpdateResolutionScale() override final;
   std::tuple<u32, u32> GetEffectiveDisplayResolution(bool scaled = true) override final;
@@ -364,7 +369,7 @@ protected:
   u32 m_multisamples = 1;
   u32 m_max_resolution_scale = 1;
   u32 m_max_multisamples = 1;
-  HostDisplay::RenderAPI m_render_api = HostDisplay::RenderAPI::None;
+  RenderAPI m_render_api = RenderAPI::None;
   bool m_true_color = true;
 
   union
@@ -372,9 +377,11 @@ protected:
     BitField<u8, bool, 0, 1> m_supports_per_sample_shading;
     BitField<u8, bool, 1, 1> m_supports_dual_source_blend;
     BitField<u8, bool, 2, 1> m_supports_adaptive_downsampling;
-    BitField<u8, bool, 3, 1> m_per_sample_shading;
-    BitField<u8, bool, 4, 1> m_scaled_dithering;
-    BitField<u8, bool, 5, 1> m_chroma_smoothing;
+    BitField<u8, bool, 3, 1> m_supports_disable_color_perspective;
+    BitField<u8, bool, 4, 1> m_per_sample_shading;
+    BitField<u8, bool, 5, 1> m_scaled_dithering;
+    BitField<u8, bool, 6, 1> m_chroma_smoothing;
+    BitField<u8, bool, 7, 1> m_disable_color_perspective;
 
     u8 bits = 0;
   };

@@ -1,7 +1,10 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "context_agl.h"
 #include "../assert.h"
 #include "../log.h"
-#include "glad.h"
+#include "loader.h"
 #include <dlfcn.h>
 Log_SetChannel(GL::ContextAGL);
 
@@ -116,6 +119,11 @@ bool ContextAGL::SwapBuffers()
 {
   [m_context flushBuffer];
   return true;
+}
+
+bool ContextAGL::IsCurrent()
+{
+  return (m_context != nil && [NSOpenGLContext currentContext] == m_context);
 }
 
 bool ContextAGL::MakeCurrent()

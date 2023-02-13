@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #include "staging_texture.h"
 #include "../align.h"
 #include "../assert.h"
@@ -44,6 +47,8 @@ bool StagingTexture::Create(u32 width, u32 height, DXGI_FORMAT format, bool for_
     Log_ErrorPrintf("Create buffer failed: 0x%08X", hr);
     return false;
   }
+
+  Destroy(true);
 
   m_resource = std::move(resource);
   m_width = width;

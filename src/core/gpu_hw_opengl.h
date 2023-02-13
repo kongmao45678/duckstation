@@ -1,16 +1,19 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
+#include "common/gl/loader.h"
 #include "common/gl/program.h"
 #include "common/gl/shader_cache.h"
 #include "common/gl/stream_buffer.h"
 #include "common/gl/texture.h"
-#include "glad.h"
 #include "gpu_hw.h"
 #include "texture_replacements.h"
 #include <array>
 #include <memory>
 #include <tuple>
 
-class GPU_HW_OpenGL : public GPU_HW
+class GPU_HW_OpenGL final : public GPU_HW
 {
 public:
   GPU_HW_OpenGL();
@@ -18,9 +21,9 @@ public:
 
   GPURenderer GetRendererType() const override;
 
-  bool Initialize(HostDisplay* host_display) override;
+  bool Initialize() override;
   void Reset(bool clear_vram) override;
-  bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display) override;
+  bool DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_display) override;
 
   void ResetGraphicsAPIState() override;
   void RestoreGraphicsAPIState() override;
@@ -53,11 +56,9 @@ private:
     u32 num_uniform_buffer_updates;
   };
 
-  ALWAYS_INLINE bool IsGLES() const { return (m_render_api == HostDisplay::RenderAPI::OpenGLES); }
+  ALWAYS_INLINE bool IsGLES() const { return (m_render_api == RenderAPI::OpenGLES); }
 
-  std::tuple<s32, s32> ConvertToFramebufferCoordinates(s32 x, s32 y);
-
-  void SetCapabilities(HostDisplay* host_display);
+  void SetCapabilities();
   bool CreateFramebuffer();
   void ClearFramebuffer();
   void CopyFramebufferForState(GLenum target, GLuint src_texture, u32 src_fbo, u32 src_x, u32 src_y, GLuint dst_texture,

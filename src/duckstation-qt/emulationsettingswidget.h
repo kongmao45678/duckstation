@@ -1,10 +1,12 @@
+// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
 #pragma once
 
 #include <QtWidgets/QWidget>
 
 #include "ui_emulationsettingswidget.h"
 
-class QtHostInterface;
 class SettingsDialog;
 
 class EmulationSettingsWidget : public QWidget
@@ -12,7 +14,7 @@ class EmulationSettingsWidget : public QWidget
   Q_OBJECT
 
 public:
-  explicit EmulationSettingsWidget(QtHostInterface* host_interface, QWidget* parent, SettingsDialog* dialog);
+  explicit EmulationSettingsWidget(SettingsDialog* dialog, QWidget* parent);
   ~EmulationSettingsWidget();
 
 private Q_SLOTS:
@@ -22,9 +24,9 @@ private Q_SLOTS:
   void updateRewind();
 
 private:
-  bool runaheadEnabled() { return m_ui.runaheadFrames->currentIndex() > 0; }
+  void fillComboBoxWithEmulationSpeeds(QComboBox* cb, float global_value);
 
   Ui::EmulationSettingsWidget m_ui;
 
-  QtHostInterface* m_host_interface;
+  SettingsDialog* m_dialog;
 };
