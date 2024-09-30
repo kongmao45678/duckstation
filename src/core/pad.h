@@ -1,8 +1,10 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #pragma once
+
 #include "types.h"
+
 #include <memory>
 
 class StateWrapper;
@@ -13,12 +15,10 @@ class Multitap;
 
 namespace Pad {
 
-static constexpr u32 NUM_SLOTS = 2;
-
 void Initialize();
 void Shutdown();
 void Reset();
-bool DoState(StateWrapper& sw);
+bool DoState(StateWrapper& sw, bool is_memory_state);
 
 Controller* GetController(u32 slot);
 void SetController(u32 slot, std::unique_ptr<Controller> dev);

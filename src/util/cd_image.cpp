@@ -1,15 +1,19 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #include "cd_image.h"
+
 #include "common/assert.h"
+#include "common/bitutils.h"
 #include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
 #include "common/string_util.h"
+
 #include <array>
-Log_SetChannel(CDImage);
+
+LOG_CHANNEL(CDImage);
 
 CDImage::CDImage() = default;
 
@@ -21,7 +25,32 @@ u32 CDImage::GetBytesPerSector(TrackMode mode)
   return sizes[static_cast<u32>(mode)];
 }
 
-std::unique_ptr<CDImage> CDImage::Open(const char* filename, bool allow_patches, Common::Error* error)
+// Adapted from
+// https://github.com/saramibreak/DiscImageCreator/blob/5a8fe21730872d67991211f1319c87f0780f2d0f/DiscImageCreator/convert.cpp
+void CDImage::DeinterleaveSubcode(const u8* subcode_in, u8* subcode_out)
+{
+  std::memset(subcode_out, 0, ALL_SUBCODE_SIZE);
+
+  u32 row = 0;
+  for (u32 bitNum = 0; bitNum < 8; bitNum++)
+  {
+    for (u32 nColumn = 0; nColumn < ALL_SUBCODE_SIZE; row++)
+    {
+      u32 mask = 0x80;
+      for (int nShift = 0; nShift < 8; nShift++, nColumn++)
+      {
+        const s32 n = static_cast<s32>(nShift) - static_cast<s32>(bitNum);
+        if (n > 0)
+          subcode_out[row] |= static_cast<u8>((subcode_in[nColumn] >> n) & mask);
+        else
+          subcode_out[row] |= static_cast<u8>((subcode_in[nColumn] << std::abs(n)) & mask);
+        mask >>= 1;
+      }
+    }
+  }
+}
+
+std::unique_ptr<CDImage> CDImage::Open(const char* filename, bool allow_patches, Error* error)
 {
   const char* extension;
 
@@ -35,14 +64,21 @@ std::unique_ptr<CDImage> CDImage::Open(const char* filename, bool allow_patches,
   extension = std::strrchr(filename, '.');
 #endif
 
+  std::unique_ptr<CDImage> image;
   if (!extension)
   {
-    Log_ErrorPrintf("Invalid filename: '%s'", filename);
-    return nullptr;
+    // Device filenames on Linux don't have extensions.
+    if (IsDeviceName(filename))
+    {
+      image = OpenDeviceImage(filename, error);
+    }
+    else
+    {
+      Error::SetStringFmt(error, "Invalid filename: '{}'", Path::GetFileName(filename));
+      return nullptr;
+    }
   }
-
-  std::unique_ptr<CDImage> image;
-  if (StringUtil::Strcasecmp(extension, ".cue") == 0)
+  else if (StringUtil::Strcasecmp(extension, ".cue") == 0)
   {
     image = OpenCueSheetImage(filename, error);
   }
@@ -77,7 +113,7 @@ std::unique_ptr<CDImage> CDImage::Open(const char* filename, bool allow_patches,
   }
   else
   {
-    Log_ErrorPrintf("Unknown extension '%s' from filename '%s'", extension, filename);
+    Error::SetStringFmt(error, "Unknown extension '{}' from filename '{}'", extension, Path::GetFileName(filename));
     return nullptr;
   }
 
@@ -94,10 +130,7 @@ std::unique_ptr<CDImage> CDImage::Open(const char* filename, bool allow_patches,
     {
       image = CDImage::OverlayPPFPatch(ppf_filename.c_str(), std::move(image));
       if (!image)
-      {
-        if (error)
-          error->SetFormattedMessage("Failed to apply ppf patch from '%s'.", ppf_filename.c_str());
-      }
+        Error::SetStringFmt(error, "Failed to apply ppf patch from '{}'.", ppf_filename);
     }
   }
 
@@ -234,9 +267,26 @@ u32 CDImage::Read(ReadMode read_mode, u32 sector_count, void* buffer)
     switch (read_mode)
     {
       case ReadMode::DataOnly:
-        std::memcpy(buffer_ptr, raw_sector + 24, DATA_SECTOR_SIZE);
+      {
+        const SectorHeader* header = reinterpret_cast<const SectorHeader*>(raw_sector + SECTOR_SYNC_SIZE);
+        if (header->sector_mode == 1)
+        {
+          std::memcpy(buffer_ptr, raw_sector + SECTOR_SYNC_SIZE + MODE1_HEADER_SIZE, DATA_SECTOR_SIZE);
+        }
+        else if (header->sector_mode == 2)
+        {
+          std::memcpy(buffer_ptr, raw_sector + SECTOR_SYNC_SIZE + MODE2_HEADER_SIZE, DATA_SECTOR_SIZE);
+        }
+        else
+        {
+          ERROR_LOG("Invalid sector mode {} at LBA {}", header->sector_mode,
+                    m_current_index->start_lba_on_disc + m_position_in_track);
+          break;
+        }
+
         buffer_ptr += DATA_SECTOR_SIZE;
-        break;
+      }
+      break;
 
       case ReadMode::RawNoSync:
         std::memcpy(buffer_ptr, raw_sector + SECTOR_SYNC_SIZE, RAW_SECTOR_SIZE - SECTOR_SYNC_SIZE);
@@ -272,7 +322,7 @@ bool CDImage::ReadRawSector(void* buffer, SubChannelQ* subq)
       // TODO: This is where we'd reconstruct the header for other mode tracks.
       if (!ReadSectorFromIndex(buffer, *m_current_index, m_position_in_index))
       {
-        Log_ErrorPrintf("Read of LBA %u failed", m_position_on_disc);
+        ERROR_LOG("Read of LBA {} failed", m_position_on_disc);
         Seek(m_position_on_disc);
         return false;
       }
@@ -294,7 +344,7 @@ bool CDImage::ReadRawSector(void* buffer, SubChannelQ* subq)
 
   if (subq && !ReadSubChannelQ(subq, *m_current_index, m_position_in_index))
   {
-    Log_ErrorPrintf("Subchannel read of LBA %u failed", m_position_on_disc);
+    ERROR_LOG("Subchannel read of LBA {} failed", m_position_on_disc);
     Seek(m_position_on_disc);
     return false;
   }
@@ -316,7 +366,7 @@ bool CDImage::HasNonStandardSubchannel() const
   return false;
 }
 
-std::string CDImage::GetMetadata(const std::string_view& type) const
+std::string CDImage::GetMetadata(std::string_view type) const
 {
   std::string result;
   if (type == "title")
@@ -343,12 +393,12 @@ u32 CDImage::GetCurrentSubImage() const
   return 0;
 }
 
-bool CDImage::SwitchSubImage(u32 index, Common::Error* error)
+bool CDImage::SwitchSubImage(u32 index, Error* error)
 {
   return false;
 }
 
-std::string CDImage::GetSubImageMetadata(u32 index, const std::string_view& type) const
+std::string CDImage::GetSubImageMetadata(u32 index, std::string_view type) const
 {
   return {};
 }
@@ -361,6 +411,11 @@ CDImage::PrecacheResult CDImage::Precache(ProgressCallback* progress /*= Progres
 bool CDImage::IsPrecached() const
 {
   return false;
+}
+
+s64 CDImage::GetSizeOnDisk() const
+{
+  return -1;
 }
 
 void CDImage::ClearTOC()
@@ -401,7 +456,7 @@ void CDImage::CopyTOC(const CDImage* image)
   m_position_on_disc = 0;
 }
 
-const CDImage::Index* CDImage::GetIndexForDiscPosition(LBA pos)
+const CDImage::Index* CDImage::GetIndexForDiscPosition(LBA pos) const
 {
   for (const Index& index : m_indices)
   {
@@ -418,7 +473,7 @@ const CDImage::Index* CDImage::GetIndexForDiscPosition(LBA pos)
   return nullptr;
 }
 
-const CDImage::Index* CDImage::GetIndexForTrackPosition(u32 track_number, LBA track_pos)
+const CDImage::Index* CDImage::GetIndexForTrackPosition(u32 track_number, LBA track_pos) const
 {
   if (track_number < 1 || track_number > m_tracks.size())
     return nullptr;
@@ -430,18 +485,18 @@ const CDImage::Index* CDImage::GetIndexForTrackPosition(u32 track_number, LBA tr
   return GetIndexForDiscPosition(track.start_lba + track_pos);
 }
 
-bool CDImage::GenerateSubChannelQ(SubChannelQ* subq, LBA lba)
+bool CDImage::GenerateSubChannelQ(SubChannelQ* subq, LBA lba) const
 {
   const Index* index = GetIndexForDiscPosition(lba);
   if (!index)
     return false;
 
-  const u32 index_offset = index->start_lba_on_disc - lba;
+  const u32 index_offset = lba - index->start_lba_on_disc;
   GenerateSubChannelQ(subq, *index, index_offset);
   return true;
 }
 
-void CDImage::GenerateSubChannelQ(SubChannelQ* subq, const Index& index, u32 index_offset)
+void CDImage::GenerateSubChannelQ(SubChannelQ* subq, const Index& index, u32 index_offset) const
 {
   subq->control_bits = index.control.bits;
   subq->track_number_bcd = (index.track_number <= m_tracks.size() ? BinaryToBCD(static_cast<u8>(index.track_number)) :
@@ -510,7 +565,8 @@ u16 CDImage::SubChannelQ::ComputeCRC(const Data& data)
   for (u32 i = 0; i < 10; i++)
     value = crc16_table[(value >> 8) ^ data[i]] ^ (value << 8);
 
-  return ~(value >> 8) | (~(value) << 8);
+  // Invert and swap
+  return ByteSwap(static_cast<u16>(~value));
 }
 
 bool CDImage::SubChannelQ::IsCRCValid() const

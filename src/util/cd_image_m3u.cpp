@@ -1,18 +1,23 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #include "cd_image.h"
 #include "cd_subchannel_replacement.h"
+
 #include "common/assert.h"
 #include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <map>
 #include <sstream>
-Log_SetChannel(CDImageMemory);
+
+LOG_CHANNEL(CDImageMemory);
+
+namespace {
 
 class CDImageM3u : public CDImage
 {
@@ -20,7 +25,7 @@ public:
   CDImageM3u();
   ~CDImageM3u() override;
 
-  bool Open(const char* path, bool apply_patches, Common::Error* Error);
+  bool Open(const char* path, bool apply_patches, Error* Error);
 
   bool ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_in_index) override;
   bool HasNonStandardSubchannel() const override;
@@ -28,8 +33,8 @@ public:
   bool HasSubImages() const override;
   u32 GetSubImageCount() const override;
   u32 GetCurrentSubImage() const override;
-  std::string GetSubImageMetadata(u32 index, const std::string_view& type) const override;
-  bool SwitchSubImage(u32 index, Common::Error* error) override;
+  std::string GetSubImageMetadata(u32 index, std::string_view type) const override;
+  bool SwitchSubImage(u32 index, Error* error) override;
 
 protected:
   bool ReadSectorFromIndex(void* buffer, const Index& index, LBA lba_in_index) override;
@@ -48,13 +53,15 @@ private:
   bool m_apply_patches = false;
 };
 
+} // namespace
+
 CDImageM3u::CDImageM3u() = default;
 
 CDImageM3u::~CDImageM3u() = default;
 
-bool CDImageM3u::Open(const char* path, bool apply_patches, Common::Error* error)
+bool CDImageM3u::Open(const char* path, bool apply_patches, Error* error)
 {
-  std::FILE* fp = FileSystem::OpenCFile(path, "rb");
+  std::FILE* fp = FileSystem::OpenSharedCFile(path, "rb", FileSystem::FileShareMode::DenyWrite, error);
   if (!fp)
     return false;
 
@@ -62,8 +69,7 @@ bool CDImageM3u::Open(const char* path, bool apply_patches, Common::Error* error
   std::fclose(fp);
   if (!m3u_file.has_value() || m3u_file->empty())
   {
-    if (error)
-      error->SetMessage("Failed to read M3u file");
+    Error::SetString(error, "Failed to read M3u file");
     return false;
   }
 
@@ -93,18 +99,19 @@ bool CDImageM3u::Open(const char* path, bool apply_patches, Common::Error* error
       continue;
 
     Entry entry;
-    std::string entry_filename(line.begin() + start_offset, line.begin() + end_offset + 1);
+    std::string entry_filename =
+      Path::ToNativePath(std::string_view(line.begin() + start_offset, line.begin() + end_offset + 1));
     entry.title = Path::GetFileTitle(entry_filename);
     if (!Path::IsAbsolute(entry_filename))
       entry.filename = Path::BuildRelativePath(path, entry_filename);
     else
       entry.filename = std::move(entry_filename);
 
-    Log_DevPrintf("Read path from m3u: '%s'", entry.filename.c_str());
+    DEV_LOG("Read path from m3u: '{}'", entry.filename);
     m_entries.push_back(std::move(entry));
   }
 
-  Log_InfoPrintf("Loaded %zu paths from m3u '%s'", m_entries.size(), path);
+  INFO_LOG("Loaded {} paths from m3u '{}'", m_entries.size(), path);
   return !m_entries.empty() && SwitchSubImage(0, error);
 }
 
@@ -128,7 +135,7 @@ u32 CDImageM3u::GetCurrentSubImage() const
   return m_current_image_index;
 }
 
-bool CDImageM3u::SwitchSubImage(u32 index, Common::Error* error)
+bool CDImageM3u::SwitchSubImage(u32 index, Error* error)
 {
   if (index >= m_entries.size())
     return false;
@@ -139,7 +146,7 @@ bool CDImageM3u::SwitchSubImage(u32 index, Common::Error* error)
   std::unique_ptr<CDImage> new_image = CDImage::Open(entry.filename.c_str(), m_apply_patches, error);
   if (!new_image)
   {
-    Log_ErrorPrintf("Failed to load subimage %u (%s)", index, entry.filename.c_str());
+    ERROR_LOG("Failed to load subimage {} ({})", index, entry.filename);
     return false;
   }
 
@@ -152,9 +159,9 @@ bool CDImageM3u::SwitchSubImage(u32 index, Common::Error* error)
   return true;
 }
 
-std::string CDImageM3u::GetSubImageMetadata(u32 index, const std::string_view& type) const
+std::string CDImageM3u::GetSubImageMetadata(u32 index, std::string_view type) const
 {
-  if (index > m_entries.size())
+  if (index >= m_entries.size())
     return {};
 
   if (type == "title")
@@ -175,7 +182,7 @@ bool CDImageM3u::ReadSubChannelQ(SubChannelQ* subq, const Index& index, LBA lba_
   return m_current_image->ReadSubChannelQ(subq, index, lba_in_index);
 }
 
-std::unique_ptr<CDImage> CDImage::OpenM3uImage(const char* filename, bool apply_patches, Common::Error* error)
+std::unique_ptr<CDImage> CDImage::OpenM3uImage(const char* filename, bool apply_patches, Error* error)
 {
   std::unique_ptr<CDImageM3u> image = std::make_unique<CDImageM3u>();
   if (!image->Open(filename, apply_patches, error))

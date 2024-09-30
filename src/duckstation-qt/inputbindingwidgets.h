@@ -1,15 +1,15 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #pragma once
 #include "common/types.h"
-#include "frontend-common/input_manager.h"
+#include "util/input_manager.h"
 #include <QtWidgets/QPushButton>
 #include <optional>
 
 class QTimer;
 
-class ControllerSettingsDialog;
+class ControllerSettingsWindow;
 class SettingsInterface;
 
 class InputBindingWidget : public QPushButton
@@ -22,7 +22,7 @@ public:
                      std::string section_name, std::string key_name);
   ~InputBindingWidget();
 
-  static bool isMouseMappingEnabled();
+  static bool isMouseMappingEnabled(SettingsInterface* sif);
 
   void initialize(SettingsInterface* sif, InputBindingInfo::Type bind_type, std::string section_name,
                   std::string key_name);
@@ -77,11 +77,11 @@ class InputVibrationBindingWidget : public QPushButton
 
 public:
   InputVibrationBindingWidget(QWidget* parent);
-  InputVibrationBindingWidget(QWidget* parent, ControllerSettingsDialog* dialog, std::string section_name,
+  InputVibrationBindingWidget(QWidget* parent, ControllerSettingsWindow* dialog, std::string section_name,
                               std::string key_name);
   ~InputVibrationBindingWidget();
 
-  void setKey(ControllerSettingsDialog* dialog, std::string section_name, std::string key_name);
+  void setKey(ControllerSettingsWindow* dialog, std::string section_name, std::string key_name);
 
 public Q_SLOTS:
   void clearBinding();
@@ -97,5 +97,5 @@ private:
   std::string m_key_name;
   std::string m_binding;
 
-  ControllerSettingsDialog* m_dialog;
+  ControllerSettingsWindow* m_dialog;
 };

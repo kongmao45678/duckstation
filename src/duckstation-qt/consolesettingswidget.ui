@@ -10,9 +10,6 @@
     <height>456</height>
    </rect>
   </property>
-  <property name="windowTitle">
-   <string>Form</string>
-  </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="leftMargin">
     <number>0</number>
@@ -43,11 +40,22 @@
        <widget class="QComboBox" name="region"/>
       </item>
       <item row="1" column="0" colspan="2">
-       <widget class="QCheckBox" name="enable8MBRAM">
-        <property name="text">
-         <string>Enable 8MB RAM (Dev Console)</string>
-        </property>
-       </widget>
+       <layout class="QGridLayout" name="gridLayout_2">
+        <item row="0" column="0">
+         <widget class="QCheckBox" name="enable8MBRAM">
+          <property name="text">
+           <string>Enable 8MB RAM (Dev Console)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QCheckBox" name="enableCheats">
+          <property name="text">
+           <string>Enable Cheats</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </widget>
@@ -59,7 +67,7 @@
      </property>
      <layout class="QFormLayout" name="formLayout_3">
       <item row="0" column="0">
-       <widget class="QLabel" name="label_3">
+       <widget class="QLabel" name="cpuExecutionModeLabel">
         <property name="text">
          <string>Execution Mode:</string>
         </property>
@@ -82,7 +90,7 @@
           <item>
            <spacer name="horizontalSpacer">
             <property name="orientation">
-             <enum>Qt::Horizontal</enum>
+             <enum>Qt::Orientation::Horizontal</enum>
             </property>
             <property name="sizeHint" stdset="0">
              <size>
@@ -98,7 +106,7 @@
              <string>100% (effective 33.3mhz)</string>
             </property>
             <property name="alignment">
-             <set>Qt::AlignCenter</set>
+             <set>Qt::AlignmentFlag::AlignCenter</set>
             </property>
            </widget>
           </item>
@@ -116,10 +124,10 @@
            <number>100</number>
           </property>
           <property name="orientation">
-           <enum>Qt::Horizontal</enum>
+           <enum>Qt::Orientation::Horizontal</enum>
           </property>
           <property name="tickPosition">
-           <enum>QSlider::TicksBothSides</enum>
+           <enum>QSlider::TickPosition::TicksBothSides</enum>
           </property>
           <property name="tickInterval">
            <number>50</number>
@@ -279,13 +287,6 @@
       </item>
       <item row="3" column="0" colspan="2">
        <layout class="QGridLayout" name="gridLayout">
-        <item row="0" column="1">
-         <widget class="QCheckBox" name="cdromRegionCheck">
-          <property name="text">
-           <string>Enable Region Check</string>
-          </property>
-         </widget>
-        </item>
         <item row="0" column="0">
          <widget class="QCheckBox" name="cdromLoadImageToRAM">
           <property name="text">
@@ -293,10 +294,17 @@
           </property>
          </widget>
         </item>
-        <item row="1" column="0">
+        <item row="0" column="1">
          <widget class="QCheckBox" name="cdromLoadImagePatches">
           <property name="text">
            <string>Apply Image Patches</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QCheckBox" name="cdromIgnoreDriveSubcode">
+          <property name="text">
+           <string>Ignore Drive Subcode</string>
           </property>
          </widget>
         </item>
@@ -315,7 +323,7 @@
    <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
-      <enum>Qt::Vertical</enum>
+      <enum>Qt::Orientation::Vertical</enum>
      </property>
      <property name="sizeHint" stdset="0">
       <size>
@@ -328,7 +336,7 @@
   </layout>
  </widget>
  <resources>
-  <include location="resources/resources.qrc"/>
+  <include location="resources/duckstation-qt.qrc"/>
  </resources>
  <connections/>
 </ui>

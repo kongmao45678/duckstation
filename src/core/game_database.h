@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #pragma once
 #include "core/types.h"
@@ -15,7 +15,7 @@ class CDImage;
 struct Settings;
 
 namespace GameDatabase {
-enum class CompatibilityRating : u32
+enum class CompatibilityRating : u8
 {
   Unknown = 0,
   DoesntBoot = 1,
@@ -31,22 +31,30 @@ enum class Trait : u32
   ForceInterpreter,
   ForceSoftwareRenderer,
   ForceSoftwareRendererForReadbacks,
+  ForceRoundUpscaledTextureCoordinates,
+  ForceAccurateBlending,
   ForceInterlacing,
+  DisableAutoAnalogMode,
   DisableTrueColor,
   DisableUpscaling,
+  DisableTextureFiltering,
+  DisableSpriteTextureFiltering,
   DisableScaledDithering,
-  DisableForceNTSCTimings,
   DisableWidescreen,
   DisablePGXP,
   DisablePGXPCulling,
   DisablePGXPTextureCorrection,
   DisablePGXPColorCorrection,
   DisablePGXPDepthBuffer,
+  DisablePGXPPreserveProjFP,
+  DisablePGXPOn2DPolygons,
   ForcePGXPVertexCache,
   ForcePGXPCPUMode,
   ForceRecompilerMemoryExceptions,
   ForceRecompilerICache,
   ForceRecompilerLUTFastmem,
+  ForceCDROMSubQSkew,
+  IsLibCryptProtected,
 
   Count
 };
@@ -59,12 +67,14 @@ struct Entry
   std::string genre;
   std::string developer;
   std::string publisher;
+  std::string compatibility_version_tested;
+  std::string compatibility_comments;
   u64 release_date;
   u8 min_players;
   u8 max_players;
   u8 min_blocks;
   u8 max_blocks;
-  u32 supported_controllers;
+  u16 supported_controllers;
   CompatibilityRating compatibility;
 
   std::bitset<static_cast<int>(Trait::Count)> traits{};
@@ -72,6 +82,9 @@ struct Entry
   std::optional<s16> display_active_end_offset;
   std::optional<s8> display_line_start_offset;
   std::optional<s8> display_line_end_offset;
+  std::optional<DisplayCropMode> display_crop_mode;
+  std::optional<DisplayDeinterlacingMode> display_deinterlacing_mode;
+  std::optional<GPULineDetectMode> gpu_line_detect_mode;
   std::optional<u32> dma_max_slice_ticks;
   std::optional<u32> dma_halt_ticks;
   std::optional<u32> gpu_fifo_size;
@@ -79,16 +92,22 @@ struct Entry
   std::optional<float> gpu_pgxp_tolerance;
   std::optional<float> gpu_pgxp_depth_threshold;
 
+  std::string disc_set_name;
+  std::vector<std::string> disc_set_serials;
+
   ALWAYS_INLINE bool HasTrait(Trait trait) const { return traits[static_cast<int>(trait)]; }
 
   void ApplySettings(Settings& settings, bool display_osd_messages) const;
+
+  std::string GenerateCompatibilityReport() const;
 };
 
 void EnsureLoaded();
 void Unload();
 
 const Entry* GetEntryForDisc(CDImage* image);
-const Entry* GetEntryForSerial(const std::string_view& serial);
+const Entry* GetEntryForGameDetails(const std::string& id, u64 hash);
+const Entry* GetEntryForSerial(std::string_view serial);
 std::string GetSerialForDisc(CDImage* image);
 std::string GetSerialForPath(const char* path);
 
@@ -101,8 +120,8 @@ const char* GetCompatibilityRatingDisplayName(CompatibilityRating rating);
 /// Map of track hashes for image verification
 struct TrackData
 {
-  TrackData(std::vector<std::string> codes, std::string revisionString, uint32_t revision)
-    : codes(std::move(codes)), revisionString(revisionString), revision(revision)
+  TrackData(std::string serial_, std::string revision_str_, uint32_t revision_)
+    : serial(std::move(serial_)), revision_str(std::move(revision_str_)), revision(revision_)
   {
   }
 
@@ -110,12 +129,12 @@ struct TrackData
   {
     // 'revisionString' is deliberately ignored in comparisons as it's redundant with comparing 'revision'! Do not
     // change!
-    return left.codes == right.codes && left.revision == right.revision;
+    return left.serial == right.serial && left.revision == right.revision;
   }
 
-  std::vector<std::string> codes;
-  std::string revisionString;
-  uint32_t revision;
+  std::string serial;
+  std::string revision_str;
+  u32 revision;
 };
 
 using TrackHashesMap = std::multimap<CDImageHasher::Hash, TrackData>;

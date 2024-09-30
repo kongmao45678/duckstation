@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #pragma once
 
@@ -10,11 +10,11 @@
 #define NOMINMAX 1
 #endif
 
-// require vista+
+// require Win10+
 #ifdef _WIN32_WINNT
 #undef _WIN32_WINNT
 #endif
-#define _WIN32_WINNT _WIN32_WINNT_VISTA
+#define _WIN32_WINNT _WIN32_WINNT_WIN10
 
 #include <windows.h>
 
@@ -26,4 +26,7 @@
 #endif
 #if defined(DeleteFile)
 #undef DeleteFile
+#endif
+#if defined(GetMessage)
+#undef GetMessage
 #endif

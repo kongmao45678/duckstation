@@ -1,16 +1,25 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #include "debuggerwindow.h"
-#include "common/assert.h"
-#include "core/cpu_core_private.h"
 #include "debuggermodels.h"
 #include "qthost.h"
 #include "qtutils.h"
+
+#include "core/bus.h"
+#include "core/cpu_code_cache.h"
+#include "core/cpu_core_private.h"
+
+#include "common/assert.h"
+
 #include <QtCore/QSignalBlocker>
+#include <QtGui/QCursor>
 #include <QtGui/QFontDatabase>
+#include <QtWidgets/QAbstractScrollArea>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QMessageBox>
+
+static constexpr int TIMER_REFRESH_INTERVAL_MS = 100;
 
 DebuggerWindow::DebuggerWindow(QWidget* parent /* = nullptr */)
   : QMainWindow(parent), m_active_memory_region(Bus::MemoryRegion::Count)
@@ -20,16 +29,25 @@ DebuggerWindow::DebuggerWindow(QWidget* parent /* = nullptr */)
   connectSignals();
   createModels();
   setMemoryViewRegion(Bus::MemoryRegion::RAM);
-  setUIEnabled(false);
+  setUIEnabled(QtHost::IsSystemPaused(), QtHost::IsSystemValid());
 }
 
 DebuggerWindow::~DebuggerWindow() = default;
 
-void DebuggerWindow::onEmulationPaused()
+void DebuggerWindow::onSystemStarted()
 {
-  setUIEnabled(true);
+  setUIEnabled(false, true);
+}
+
+void DebuggerWindow::onSystemDestroyed()
+{
+  setUIEnabled(false, false);
+}
+
+void DebuggerWindow::onSystemPaused()
+{
+  setUIEnabled(true, true);
   refreshAll();
-  refreshBreakpointList();
 
   {
     QSignalBlocker sb(m_ui.actionPause);
@@ -37,9 +55,9 @@ void DebuggerWindow::onEmulationPaused()
   }
 }
 
-void DebuggerWindow::onEmulationResumed()
+void DebuggerWindow::onSystemResumed()
 {
-  setUIEnabled(false);
+  setUIEnabled(false, true);
 
   {
     QSignalBlocker sb(m_ui.actionPause);
@@ -52,30 +70,46 @@ void DebuggerWindow::onDebuggerMessageReported(const QString& message)
   m_ui.statusbar->showMessage(message, 0);
 }
 
+void DebuggerWindow::timerRefresh()
+{
+  m_ui.memoryView->forceRefresh();
+}
+
 void DebuggerWindow::refreshAll()
 {
-  m_registers_model->invalidateView();
+  m_registers_model->updateValues();
   m_stack_model->invalidateView();
-  m_ui.memoryView->repaint();
+  m_ui.memoryView->forceRefresh();
 
-  m_code_model->setPC(CPU::g_state.regs.pc);
-  scrollToPC();
+  m_code_model->setPC(CPU::g_state.pc);
+  scrollToPC(false);
 }
 
-void DebuggerWindow::scrollToPC()
+void DebuggerWindow::scrollToPC(bool center)
 {
-  return scrollToCodeAddress(CPU::g_state.regs.pc);
+  return scrollToCodeAddress(CPU::g_state.pc, center);
 }
 
-void DebuggerWindow::scrollToCodeAddress(VirtualMemoryAddress address)
+void DebuggerWindow::scrollToCodeAddress(VirtualMemoryAddress address, bool center)
 {
   m_code_model->ensureAddressVisible(address);
 
-  int row = m_code_model->getRowForAddress(address);
+  const int row = m_code_model->getRowForAddress(address);
   if (row >= 0)
   {
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-    m_ui.codeView->scrollTo(m_code_model->index(row, 0));
+
+    const QModelIndex index = m_code_model->index(row, 0);
+    const QRect rect = m_ui.codeView->visualRect(index);
+    if (rect.left() < 0 || rect.top() < 0 || rect.right() > m_ui.codeView->viewport()->width() ||
+        rect.bottom() > m_ui.codeView->viewport()->height())
+    {
+      center = true;
+    }
+
+    m_ui.codeView->scrollTo(index, center ? QAbstractItemView::PositionAtCenter : QAbstractItemView::EnsureVisible);
+    m_ui.codeView->selectionModel()->setCurrentIndex(index,
+                                                     QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
   }
 }
 
@@ -83,8 +117,8 @@ void DebuggerWindow::onPauseActionToggled(bool paused)
 {
   if (!paused)
   {
-    m_registers_model->saveCurrentValues();
-    setUIEnabled(false);
+    saveCurrentState();
+    setUIEnabled(false, true);
   }
 
   g_emu_thread->setSystemPaused(paused);
@@ -99,13 +133,13 @@ void DebuggerWindow::onRunToCursorTriggered()
     return;
   }
 
-  CPU::AddBreakpoint(addr.value(), true, true);
+  CPU::AddBreakpoint(CPU::BreakpointType::Execute, addr.value(), true, true);
   g_emu_thread->setSystemPaused(false);
 }
 
 void DebuggerWindow::onGoToPCTriggered()
 {
-  scrollToPC();
+  scrollToPC(true);
 }
 
 void DebuggerWindow::onGoToAddressTriggered()
@@ -115,7 +149,7 @@ void DebuggerWindow::onGoToAddressTriggered()
   if (!address.has_value())
     return;
 
-  scrollToCodeAddress(address.value());
+  scrollToCodeAddress(address.value(), true);
 }
 
 void DebuggerWindow::onDumpAddressTriggered()
@@ -151,18 +185,11 @@ void DebuggerWindow::onFollowAddressTriggered()
 
 void DebuggerWindow::onAddBreakpointTriggered()
 {
-  std::optional<VirtualMemoryAddress> address =
-    QtUtils::PromptForAddress(this, windowTitle(), tr("Enter code address:"), true);
-  if (!address.has_value())
+  DebuggerAddBreakpointDialog dlg(this);
+  if (!dlg.exec())
     return;
 
-  if (CPU::HasBreakpointAtAddress(address.value()))
-  {
-    QMessageBox::critical(this, windowTitle(), tr("A breakpoint already exists at this address."));
-    return;
-  }
-
-  toggleBreakpoint(address.value());
+  addBreakpoint(dlg.getType(), dlg.getAddress());
 }
 
 void DebuggerWindow::onToggleBreakpointTriggered()
@@ -179,12 +206,44 @@ void DebuggerWindow::onClearBreakpointsTriggered()
   clearBreakpoints();
 }
 
+void DebuggerWindow::onBreakpointListContextMenuRequested()
+{
+  const QList<QTreeWidgetItem*> selected = m_ui.breakpointsWidget->selectedItems();
+  if (selected.size() != 1)
+    return;
+
+  const QTreeWidgetItem* item = selected[0];
+  const u32 address = item->data(1, Qt::UserRole).toUInt();
+  const CPU::BreakpointType type = static_cast<CPU::BreakpointType>(item->data(2, Qt::UserRole).toUInt());
+
+  QMenu menu(this);
+  connect(menu.addAction(tr("&Remove")), &QAction::triggered, this,
+          [this, address, type]() { removeBreakpoint(type, address); });
+  menu.exec(QCursor::pos());
+}
+
+void DebuggerWindow::onBreakpointListItemChanged(QTreeWidgetItem* item, int column)
+{
+  // checkbox
+  if (column != 0)
+    return;
+
+  bool ok;
+  const uint bp_addr = item->data(1, Qt::UserRole).toUInt(&ok);
+  if (!ok)
+    return;
+
+  const bool enabled = (item->checkState(0) == Qt::Checked);
+
+  Host::RunOnCPUThread(
+    [bp_addr, enabled]() { CPU::SetBreakpointEnabled(CPU::BreakpointType::Execute, bp_addr, enabled); });
+}
+
 void DebuggerWindow::onStepIntoActionTriggered()
 {
   Assert(System::IsPaused());
-  m_registers_model->saveCurrentValues();
+  saveCurrentState();
   g_emu_thread->singleStepCPU();
-  refreshAll();
 }
 
 void DebuggerWindow::onStepOverActionTriggered()
@@ -197,7 +256,7 @@ void DebuggerWindow::onStepOverActionTriggered()
   }
 
   // unpause to let it run to the breakpoint
-  m_registers_model->saveCurrentValues();
+  saveCurrentState();
   g_emu_thread->setSystemPaused(false);
 }
 
@@ -211,7 +270,7 @@ void DebuggerWindow::onStepOutActionTriggered()
   }
 
   // unpause to let it run to the breakpoint
-  m_registers_model->saveCurrentValues();
+  saveCurrentState();
   g_emu_thread->setSystemPaused(false);
 }
 
@@ -251,22 +310,22 @@ void DebuggerWindow::onCodeViewContextMenuRequested(const QPoint& pt)
   menu.addAction(QStringLiteral("0x%1").arg(static_cast<uint>(address), 8, 16, QChar('0')))->setEnabled(false);
   menu.addSeparator();
 
-  QAction* action = menu.addAction(QIcon(":/icons/media-record@2x.png"), tr("Toggle &Breakpoint"));
+  QAction* action = menu.addAction(QIcon::fromTheme("debug-toggle-breakpoint"), tr("Toggle &Breakpoint"));
   connect(action, &QAction::triggered, this, [this, address]() { toggleBreakpoint(address); });
 
-  action = menu.addAction(QIcon(":/icons/debug-run-cursor.png"), tr("&Run To Cursor"));
+  action = menu.addAction(QIcon::fromTheme("debugger-go-to-cursor"), tr("&Run To Cursor"));
   connect(action, &QAction::triggered, this, [address]() {
     Host::RunOnCPUThread([address]() {
-      CPU::AddBreakpoint(address, true, true);
+      CPU::AddBreakpoint(CPU::BreakpointType::Execute, address, true, true);
       g_emu_thread->setSystemPaused(false);
     });
   });
 
   menu.addSeparator();
-  action = menu.addAction(QIcon(":/icons/antialias-icon.png"), tr("View in &Dump"));
+  action = menu.addAction(QIcon::fromTheme("debugger-go-to-address"), tr("View in &Dump"));
   connect(action, &QAction::triggered, this, [this, address]() { scrollToMemoryAddress(address); });
 
-  action = menu.addAction(QIcon(":/icons/debug-trace.png"), tr("Follow Load/Store"));
+  action = menu.addAction(QIcon::fromTheme("debug-trace-line"), tr("&Follow Load/Store"));
   connect(action, &QAction::triggered, this, [this, address]() { tryFollowLoadStore(address); });
 
   menu.exec(m_ui.codeView->mapToGlobal(pt));
@@ -390,15 +449,17 @@ void DebuggerWindow::onMemorySearchStringChanged(const QString&)
 
 void DebuggerWindow::closeEvent(QCloseEvent* event)
 {
+  QtUtils::SaveWindowGeometry("DebuggerWindow", this);
+  g_emu_thread->disconnect(this);
+  Host::RunOnCPUThread(&CPU::ClearBreakpoints);
   QMainWindow::closeEvent(event);
-  g_emu_thread->setSystemPaused(true, true);
-  CPU::ClearBreakpoints();
-  g_emu_thread->setSystemPaused(false);
   emit closed();
 }
 
 void DebuggerWindow::setupAdditionalUi()
 {
+  setWindowIcon(QtHost::GetAppIcon());
+
 #ifdef _WIN32
   QFont fixedFont;
   fixedFont.setFamily(QStringLiteral("Consolas"));
@@ -414,17 +475,21 @@ void DebuggerWindow::setupAdditionalUi()
   m_ui.stackView->setFont(fixedFont);
 
   m_ui.codeView->setContextMenuPolicy(Qt::CustomContextMenu);
+  m_ui.breakpointsWidget->setContextMenuPolicy(Qt::CustomContextMenu);
 
   setCentralWidget(nullptr);
   delete m_ui.centralwidget;
+
+  QtUtils::RestoreWindowGeometry("DebuggerWindow", this);
 }
 
 void DebuggerWindow::connectSignals()
 {
-  EmuThread* hi = g_emu_thread;
-  connect(hi, &EmuThread::systemPaused, this, &DebuggerWindow::onEmulationPaused);
-  connect(hi, &EmuThread::systemResumed, this, &DebuggerWindow::onEmulationResumed);
-  connect(hi, &EmuThread::debuggerMessageReported, this, &DebuggerWindow::onDebuggerMessageReported);
+  connect(g_emu_thread, &EmuThread::systemPaused, this, &DebuggerWindow::onSystemPaused);
+  connect(g_emu_thread, &EmuThread::systemResumed, this, &DebuggerWindow::onSystemResumed);
+  connect(g_emu_thread, &EmuThread::systemStarted, this, &DebuggerWindow::onSystemStarted);
+  connect(g_emu_thread, &EmuThread::systemDestroyed, this, &DebuggerWindow::onSystemDestroyed);
+  connect(g_emu_thread, &EmuThread::debuggerMessageReported, this, &DebuggerWindow::onDebuggerMessageReported);
 
   connect(m_ui.actionPause, &QAction::toggled, this, &DebuggerWindow::onPauseActionToggled);
   connect(m_ui.actionRunToCursor, &QAction::triggered, this, &DebuggerWindow::onRunToCursorTriggered);
@@ -441,6 +506,9 @@ void DebuggerWindow::connectSignals()
   connect(m_ui.actionClose, &QAction::triggered, this, &DebuggerWindow::close);
   connect(m_ui.codeView, &QTreeView::activated, this, &DebuggerWindow::onCodeViewItemActivated);
   connect(m_ui.codeView, &QTreeView::customContextMenuRequested, this, &DebuggerWindow::onCodeViewContextMenuRequested);
+  connect(m_ui.breakpointsWidget, &QTreeWidget::customContextMenuRequested, this,
+          &DebuggerWindow::onBreakpointListContextMenuRequested);
+  connect(m_ui.breakpointsWidget, &QTreeWidget::itemChanged, this, &DebuggerWindow::onBreakpointListItemChanged);
 
   connect(m_ui.memoryRegionRAM, &QRadioButton::clicked, [this]() { setMemoryViewRegion(Bus::MemoryRegion::RAM); });
   connect(m_ui.memoryRegionEXP1, &QRadioButton::clicked, [this]() { setMemoryViewRegion(Bus::MemoryRegion::EXP1); });
@@ -450,6 +518,9 @@ void DebuggerWindow::connectSignals()
 
   connect(m_ui.memorySearch, &QPushButton::clicked, this, &DebuggerWindow::onMemorySearchTriggered);
   connect(m_ui.memorySearchString, &QLineEdit::textChanged, this, &DebuggerWindow::onMemorySearchStringChanged);
+
+  connect(&m_refresh_timer, &QTimer::timeout, this, &DebuggerWindow::timerRefresh);
+  m_refresh_timer.setInterval(TIMER_REFRESH_INTERVAL_MS);
 }
 
 void DebuggerWindow::disconnectSignals()
@@ -479,32 +550,48 @@ void DebuggerWindow::createModels()
 
   m_ui.breakpointsWidget->setColumnWidth(0, 50);
   m_ui.breakpointsWidget->setColumnWidth(1, 80);
-  m_ui.breakpointsWidget->setColumnWidth(2, 40);
+  m_ui.breakpointsWidget->setColumnWidth(2, 50);
+  m_ui.breakpointsWidget->setColumnWidth(3, 40);
   m_ui.breakpointsWidget->setRootIsDecorated(false);
 }
 
-void DebuggerWindow::setUIEnabled(bool enabled)
+void DebuggerWindow::setUIEnabled(bool enabled, bool allow_pause)
 {
+  const bool memory_view_enabled = (enabled || allow_pause);
+
+  m_ui.actionPause->setEnabled(allow_pause);
+
   // Disable all UI elements that depend on execution state
   m_ui.codeView->setEnabled(enabled);
   m_ui.registerView->setEnabled(enabled);
   m_ui.stackView->setEnabled(enabled);
-  m_ui.memoryView->setEnabled(enabled);
+  m_ui.memoryView->setEnabled(memory_view_enabled);
   m_ui.actionRunToCursor->setEnabled(enabled);
   m_ui.actionAddBreakpoint->setEnabled(enabled);
   m_ui.actionToggleBreakpoint->setEnabled(enabled);
   m_ui.actionClearBreakpoints->setEnabled(enabled);
-  m_ui.actionDumpAddress->setEnabled(enabled);
+  m_ui.actionDumpAddress->setEnabled(memory_view_enabled);
   m_ui.actionStepInto->setEnabled(enabled);
   m_ui.actionStepOver->setEnabled(enabled);
   m_ui.actionStepOut->setEnabled(enabled);
   m_ui.actionGoToAddress->setEnabled(enabled);
   m_ui.actionGoToPC->setEnabled(enabled);
   m_ui.actionTrace->setEnabled(enabled);
-  m_ui.memoryRegionRAM->setEnabled(enabled);
-  m_ui.memoryRegionEXP1->setEnabled(enabled);
-  m_ui.memoryRegionScratchpad->setEnabled(enabled);
-  m_ui.memoryRegionBIOS->setEnabled(enabled);
+  m_ui.memoryRegionRAM->setEnabled(memory_view_enabled);
+  m_ui.memoryRegionEXP1->setEnabled(memory_view_enabled);
+  m_ui.memoryRegionScratchpad->setEnabled(memory_view_enabled);
+  m_ui.memoryRegionBIOS->setEnabled(memory_view_enabled);
+
+  // Partial/timer refreshes only active when not paused.
+  const bool timer_active = (!enabled && allow_pause);
+  if (m_refresh_timer.isActive() != timer_active)
+    timer_active ? m_refresh_timer.start() : m_refresh_timer.stop();
+}
+
+void DebuggerWindow::saveCurrentState()
+{
+  m_registers_model->saveCurrentValues();
+  m_ui.memoryView->saveCurrentData();
 }
 
 void DebuggerWindow::setMemoryViewRegion(Bus::MemoryRegion region)
@@ -514,9 +601,27 @@ void DebuggerWindow::setMemoryViewRegion(Bus::MemoryRegion region)
 
   m_active_memory_region = region;
 
+  static constexpr auto edit_ram_callback = [](size_t offset, size_t count) {
+    // shouldn't happen
+    if (offset > Bus::g_ram_size)
+      return;
+
+    const u32 start_page = static_cast<u32>(offset) / HOST_PAGE_SIZE;
+    const u32 end_page = static_cast<u32>(offset + count - 1) / HOST_PAGE_SIZE;
+    for (u32 i = start_page; i <= end_page; i++)
+    {
+      if (Bus::g_ram_code_bits[i])
+        CPU::CodeCache::InvalidateBlocksWithPageIndex(i);
+    }
+  };
+
   const PhysicalMemoryAddress start = Bus::GetMemoryRegionStart(region);
   const PhysicalMemoryAddress end = Bus::GetMemoryRegionEnd(region);
-  m_ui.memoryView->setData(start, Bus::GetMemoryRegionPointer(region), end - start);
+  void* const mem_ptr = Bus::GetMemoryRegionPointer(region);
+  const bool mem_writable = Bus::IsMemoryRegionWritable(region);
+  const MemoryViewWidget::EditCallback edit_callback =
+    ((region == Bus::MemoryRegion::RAM) ? static_cast<MemoryViewWidget::EditCallback>(edit_ram_callback) : nullptr);
+  m_ui.memoryView->setData(start, mem_ptr, end - start, mem_writable, edit_callback);
 
 #define SET_REGION_RADIO_BUTTON(name, rb_region)                                                                       \
   do                                                                                                                   \
@@ -537,26 +642,30 @@ void DebuggerWindow::setMemoryViewRegion(Bus::MemoryRegion region)
 
 void DebuggerWindow::toggleBreakpoint(VirtualMemoryAddress address)
 {
-  const bool new_bp_state = !CPU::HasBreakpointAtAddress(address);
-  if (new_bp_state)
-  {
-    if (!CPU::AddBreakpoint(address, false))
-      return;
-  }
-  else
-  {
-    if (!CPU::RemoveBreakpoint(address))
-      return;
-  }
+  Host::RunOnCPUThread([this, address]() {
+    const bool new_bp_state = !CPU::HasBreakpointAtAddress(CPU::BreakpointType::Execute, address);
+    if (new_bp_state)
+    {
+      if (!CPU::AddBreakpoint(CPU::BreakpointType::Execute, address, false))
+        return;
+    }
+    else
+    {
+      if (!CPU::RemoveBreakpoint(CPU::BreakpointType::Execute, address))
+        return;
+    }
 
-  m_code_model->setBreakpointState(address, new_bp_state);
-  refreshBreakpointList();
+    QtHost::RunOnUIThread([this, address, new_bp_state, bps = CPU::CopyBreakpointList()]() {
+      m_code_model->setBreakpointState(address, new_bp_state);
+      refreshBreakpointList(bps);
+    });
+  });
 }
 
 void DebuggerWindow::clearBreakpoints()
 {
   m_code_model->clearBreakpoints();
-  CPU::ClearBreakpoints();
+  Host::RunOnCPUThread(&CPU::ClearBreakpoints);
 }
 
 std::optional<VirtualMemoryAddress> DebuggerWindow::getSelectedCodeAddress()
@@ -593,16 +702,21 @@ bool DebuggerWindow::scrollToMemoryAddress(VirtualMemoryAddress address)
   setMemoryViewRegion(region.value());
 
   const PhysicalMemoryAddress offset = phys_address - Bus::GetMemoryRegionStart(region.value());
-  m_ui.memoryView->scrolltoOffset(offset);
+  m_ui.memoryView->scrollToOffset(offset);
   return true;
 }
 
 void DebuggerWindow::refreshBreakpointList()
 {
+  Host::RunOnCPUThread(
+    [this]() { QtHost::RunOnUIThread([this, bps = CPU::CopyBreakpointList()]() { refreshBreakpointList(bps); }); });
+}
+
+void DebuggerWindow::refreshBreakpointList(const CPU::BreakpointList& bps)
+{
   while (m_ui.breakpointsWidget->topLevelItemCount() > 0)
     delete m_ui.breakpointsWidget->takeTopLevelItem(0);
 
-  const CPU::BreakpointList bps(CPU::GetBreakpointList());
   for (const CPU::Breakpoint& bp : bps)
   {
     QTreeWidgetItem* item = new QTreeWidgetItem();
@@ -610,7 +724,50 @@ void DebuggerWindow::refreshBreakpointList()
     item->setCheckState(0, bp.enabled ? Qt::Checked : Qt::Unchecked);
     item->setText(0, QString::asprintf("%u", bp.number));
     item->setText(1, QString::asprintf("0x%08X", bp.address));
-    item->setText(2, QString::asprintf("%u", bp.hit_count));
+    item->setText(2, QString::fromUtf8(CPU::GetBreakpointTypeName(bp.type)));
+    item->setText(3, QString::asprintf("%u", bp.hit_count));
+    item->setData(0, Qt::UserRole, bp.number);
+    item->setData(1, Qt::UserRole, QVariant(static_cast<uint>(bp.address)));
+    item->setData(2, Qt::UserRole, static_cast<u32>(bp.type));
     m_ui.breakpointsWidget->addTopLevelItem(item);
   }
+}
+
+void DebuggerWindow::addBreakpoint(CPU::BreakpointType type, u32 address)
+{
+  Host::RunOnCPUThread([this, address, type]() {
+    const bool result = CPU::AddBreakpoint(type, address);
+    QtHost::RunOnUIThread([this, address, type, result, bps = CPU::CopyBreakpointList()]() {
+      if (!result)
+      {
+        QMessageBox::critical(this, windowTitle(),
+                              tr("Failed to add breakpoint. A breakpoint may already exist at this address."));
+        return;
+      }
+
+      if (type == CPU::BreakpointType::Execute)
+        m_code_model->setBreakpointState(address, true);
+
+      refreshBreakpointList(bps);
+    });
+  });
+}
+
+void DebuggerWindow::removeBreakpoint(CPU::BreakpointType type, u32 address)
+{
+  Host::RunOnCPUThread([this, address, type]() {
+    const bool result = CPU::RemoveBreakpoint(type, address);
+    QtHost::RunOnUIThread([this, address, type, result, bps = CPU::CopyBreakpointList()]() {
+      if (!result)
+      {
+        QMessageBox::critical(this, windowTitle(), tr("Failed to remove breakpoint. This breakpoint may not exist."));
+        return;
+      }
+
+      if (type == CPU::BreakpointType::Execute)
+        m_code_model->setBreakpointState(address, false);
+
+      refreshBreakpointList(bps);
+    });
+  });
 }

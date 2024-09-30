@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 /**
  * Provides a map template which doesn't require heap allocations for lookups.
@@ -47,8 +47,14 @@ struct transparent_string_less
 };
 } // namespace detail
 
-// This requires C++20, so fallback to ugly heap allocations if we don't have it.
-#if __cplusplus >= 202002L
+template<typename ValueType>
+using StringMap = std::map<std::string, ValueType, detail::transparent_string_less>;
+template<typename ValueType>
+using StringMultiMap = std::multimap<std::string, ValueType, detail::transparent_string_less>;
+using StringSet = std::set<std::string, detail::transparent_string_less>;
+using StringMultiSet = std::multiset<std::string, detail::transparent_string_less>;
+
+#if defined(__cpp_lib_generic_unordered_lookup) && __cpp_lib_generic_unordered_lookup >= 201811L
 template<typename ValueType>
 using UnorderedStringMap =
   std::unordered_map<std::string, ValueType, detail::transparent_string_hash, detail::transparent_string_equal>;
@@ -60,95 +66,22 @@ using UnorderedStringSet =
 using UnorderedStringMultiSet =
   std::unordered_multiset<std::string, detail::transparent_string_hash, detail::transparent_string_equal>;
 
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMap<ValueType>::const_iterator
-UnorderedStringMapFind(const UnorderedStringMap<ValueType>& map, const KeyType& key)
-{
-  return map.find(key);
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMap<ValueType>::iterator
-UnorderedStringMapFind(UnorderedStringMap<ValueType>& map, const KeyType& key)
-{
-  return map.find(key);
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMultimap<ValueType>::const_iterator
-UnorderedStringMultiMapFind(const UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.find(key);
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE std::pair<typename UnorderedStringMultimap<ValueType>::const_iterator,
-                        typename UnorderedStringMultimap<ValueType>::const_iterator>
-UnorderedStringMultiMapEqualRange(const UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.equal_range(key);
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMultimap<ValueType>::iterator
-UnorderedStringMultiMapFind(UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.find(key);
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE std::pair<typename UnorderedStringMultimap<ValueType>::iterator,
-                        typename UnorderedStringMultimap<ValueType>::iterator>
-UnorderedStringMultiMapEqualRange(UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.equal_range(key);
-}
+template<typename ValueType>
+using PreferUnorderedStringMap = UnorderedStringMap<ValueType>;
+template<typename ValueType>
+using PreferUnorderedStringMultimap = UnorderedStringMultimap<ValueType>;
+using PreferUnorderedStringSet = UnorderedStringSet;
+using PreferUnorderedStringMultiSet = UnorderedStringMultiSet;
 #else
-template<typename ValueType>
-using UnorderedStringMap = std::unordered_map<std::string, ValueType>;
-template<typename ValueType>
-using UnorderedStringMultimap = std::unordered_multimap<std::string, ValueType>;
-using UnorderedStringSet = std::unordered_set<std::string>;
-using UnorderedStringMultiSet = std::unordered_multiset<std::string>;
 
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMap<ValueType>::const_iterator
-UnorderedStringMapFind(const UnorderedStringMap<ValueType>& map, const KeyType& key)
-{
-  return map.find(std::string(key));
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMap<ValueType>::iterator
-UnorderedStringMapFind(UnorderedStringMap<ValueType>& map, const KeyType& key)
-{
-  return map.find(std::string(key));
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMultimap<ValueType>::const_iterator
-UnorderedStringMultiMapFind(const UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.find(std::string(key));
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE std::pair<typename UnorderedStringMultimap<ValueType>::const_iterator,
-                        typename UnorderedStringMultimap<ValueType>::const_iterator>
-UnorderedStringMultiMapEqualRange(const UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.equal_range(std::string(key));
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE typename UnorderedStringMultimap<ValueType>::iterator
-UnorderedStringMultiMapFind(UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.find(std::string(key));
-}
-template<typename KeyType, typename ValueType>
-ALWAYS_INLINE std::pair<typename UnorderedStringMultimap<ValueType>::iterator,
-                        typename UnorderedStringMultimap<ValueType>::iterator>
-UnorderedStringMultiMapEqualRange(UnorderedStringMultimap<ValueType>& map, const KeyType& key)
-{
-  return map.equal_range(std::string(key));
-}
+#pragma message "__cpp_lib_generic_unordered_lookup is missing, performance will be slower."
+
+// GCC 10 doesn't support generic_unordered_lookup...
+template<typename ValueType>
+using PreferUnorderedStringMap = StringMap<ValueType>;
+template<typename ValueType>
+using PreferUnorderedStringMultimap = StringMultiMap<ValueType>;
+using PreferUnorderedStringSet = StringSet;
+using PreferUnorderedStringMultiSet = StringMultiSet;
+
 #endif
-
-template<typename ValueType>
-using StringMap = std::map<std::string, ValueType, detail::transparent_string_less>;
-template<typename ValueType>
-using StringMultiMap = std::multimap<std::string, ValueType, detail::transparent_string_less>;
-using StringSet = std::set<std::string, detail::transparent_string_less>;
-using StringMultiSet = std::multiset<std::string, detail::transparent_string_less>;

@@ -1,10 +1,14 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #pragma once
-#include "common/bitfield.h"
-#include "common/rectangle.h"
+
 #include "types.h"
+
+#include "common/bitfield.h"
+#include "common/bitutils.h"
+#include "common/gsvector.h"
+
 #include <array>
 
 enum : u32
@@ -16,12 +20,21 @@ enum : u32
   VRAM_HEIGHT_MASK = VRAM_HEIGHT - 1,
   TEXTURE_PAGE_WIDTH = 256,
   TEXTURE_PAGE_HEIGHT = 256,
+  GPU_CLUT_SIZE = 256,
 
   // In interlaced modes, we can exceed the 512 height of VRAM, up to 576 in PAL games.
   GPU_MAX_DISPLAY_WIDTH = 720,
   GPU_MAX_DISPLAY_HEIGHT = 576,
 
-  DITHER_MATRIX_SIZE = 4
+  DITHER_MATRIX_SIZE = 4,
+
+  VRAM_PAGE_WIDTH = 64,
+  VRAM_PAGE_HEIGHT = 256,
+  VRAM_PAGES_WIDE = VRAM_WIDTH / VRAM_PAGE_WIDTH,
+  VRAM_PAGES_HIGH = VRAM_HEIGHT / VRAM_PAGE_HEIGHT,
+  VRAM_PAGE_X_MASK = 0xf,  // 16 pages wide
+  VRAM_PAGE_Y_MASK = 0x10, // 2 pages high
+  NUM_VRAM_PAGES = VRAM_PAGES_WIDE * VRAM_PAGES_HIGH,
 };
 
 enum : s32
@@ -51,19 +64,15 @@ enum class GPUTextureMode : u8
   Palette4Bit = 0,
   Palette8Bit = 1,
   Direct16Bit = 2,
-  Reserved_Direct16Bit = 3,
-
-  // Not register values.
-  RawTextureBit = 4,
-  RawPalette4Bit = RawTextureBit | Palette4Bit,
-  RawPalette8Bit = RawTextureBit | Palette8Bit,
-  RawDirect16Bit = RawTextureBit | Direct16Bit,
-  Reserved_RawDirect16Bit = RawTextureBit | Reserved_Direct16Bit,
-
-  Disabled = 8 // Not a register value
+  Reserved_Direct16Bit = 3, // Not used.
 };
 
 IMPLEMENT_ENUM_CLASS_BITWISE_OPERATORS(GPUTextureMode);
+
+ALWAYS_INLINE static constexpr bool TextureModeHasPalette(GPUTextureMode mode)
+{
+  return (mode < GPUTextureMode::Direct16Bit);
+}
 
 enum class GPUTransparencyMode : u8
 {
@@ -82,6 +91,21 @@ enum class GPUInterlacedDisplayMode : u8
   SeparateFields
 };
 
+// NOTE: Inclusive, not exclusive on the upper bounds.
+struct GPUDrawingArea
+{
+  u32 left;
+  u32 top;
+  u32 right;
+  u32 bottom;
+};
+
+struct GPUDrawingOffset
+{
+  s32 x;
+  s32 y;
+};
+
 union GPURenderCommand
 {
   u32 bits;
@@ -93,7 +117,7 @@ union GPURenderCommand
   BitField<u32, GPUDrawRectangleSize, 27, 2> rectangle_size; // only for rectangles
   BitField<u32, bool, 27, 1> quad_polygon;                   // only for polygons
   BitField<u32, bool, 27, 1> polyline;                       // only for lines
-  BitField<u32, bool, 28, 1> shading_enable;                 // 0 - flat, 1 = gouroud
+  BitField<u32, bool, 28, 1> shading_enable;                 // 0 - flat, 1 = gouraud
   BitField<u32, GPUPrimitive, 29, 21> primitive;
 
   /// Returns true if texturing should be enabled. Depends on the primitive type.
@@ -158,7 +182,7 @@ static constexpr s32 TruncateGPUVertexPosition(s32 x)
 union GPUDrawModeReg
 {
   static constexpr u16 MASK = 0b1111111111111;
-  static constexpr u16 TEXTURE_PAGE_MASK = UINT16_C(0b0000000000011111);
+  static constexpr u16 TEXTURE_MODE_AND_PAGE_MASK = UINT16_C(0b0000000110011111);
 
   // Polygon texpage commands only affect bits 0-8, 11
   static constexpr u16 POLYGON_TEXPAGE_MASK = 0b0000100111111111;
@@ -168,6 +192,7 @@ union GPUDrawModeReg
 
   u16 bits;
 
+  BitField<u16, u8, 0, 5> texture_page;
   BitField<u16, u8, 0, 4> texture_page_x_base;
   BitField<u16, u8, 4, 1> texture_page_y_base;
   BitField<u16, GPUTransparencyMode, 5, 2> transparency_mode;
@@ -178,21 +203,11 @@ union GPUDrawModeReg
   BitField<u16, bool, 12, 1> texture_x_flip;
   BitField<u16, bool, 13, 1> texture_y_flip;
 
-  ALWAYS_INLINE u16 GetTexturePageBaseX() const { return ZeroExtend16(texture_page_x_base.GetValue()) * 64; }
-  ALWAYS_INLINE u16 GetTexturePageBaseY() const { return ZeroExtend16(texture_page_y_base.GetValue()) * 256; }
+  ALWAYS_INLINE u32 GetTexturePageBaseX() const { return ZeroExtend32(texture_page_x_base.GetValue()) * 64; }
+  ALWAYS_INLINE u32 GetTexturePageBaseY() const { return ZeroExtend32(texture_page_y_base.GetValue()) * 256; }
 
   /// Returns true if the texture mode requires a palette.
   ALWAYS_INLINE bool IsUsingPalette() const { return (bits & (2 << 7)) == 0; }
-
-  /// Returns a rectangle comprising the texture page area.
-  ALWAYS_INLINE_RELEASE Common::Rectangle<u32> GetTexturePageRectangle() const
-  {
-    static constexpr std::array<u32, 4> texture_page_widths = {
-      {TEXTURE_PAGE_WIDTH / 4, TEXTURE_PAGE_WIDTH / 2, TEXTURE_PAGE_WIDTH, TEXTURE_PAGE_WIDTH}};
-    return Common::Rectangle<u32>::FromExtents(GetTexturePageBaseX(), GetTexturePageBaseY(),
-                                               texture_page_widths[static_cast<u8>(texture_mode.GetValue())],
-                                               TEXTURE_PAGE_HEIGHT);
-  }
 };
 
 union GPUTexturePaletteReg
@@ -204,8 +219,8 @@ union GPUTexturePaletteReg
   BitField<u16, u16, 0, 6> x;
   BitField<u16, u16, 6, 9> y;
 
-  ALWAYS_INLINE u32 GetXBase() const { return static_cast<u32>(x) * 16u; }
-  ALWAYS_INLINE u32 GetYBase() const { return static_cast<u32>(y); }
+  ALWAYS_INLINE constexpr u32 GetXBase() const { return static_cast<u32>(x) * 16u; }
+  ALWAYS_INLINE constexpr u32 GetYBase() const { return static_cast<u32>(y); }
 };
 
 struct GPUTextureWindow
@@ -215,6 +230,119 @@ struct GPUTextureWindow
   u8 or_x;
   u8 or_y;
 };
+
+ALWAYS_INLINE static constexpr u32 VRAMPageIndex(u32 px, u32 py)
+{
+  return ((py * VRAM_PAGES_WIDE) + px);
+}
+ALWAYS_INLINE static constexpr GSVector4i VRAMPageRect(u32 px, u32 py)
+{
+  return GSVector4i::cxpr(px * VRAM_PAGE_WIDTH, py * VRAM_PAGE_HEIGHT, (px + 1) * VRAM_PAGE_WIDTH,
+                          (py + 1) * VRAM_PAGE_HEIGHT);
+}
+ALWAYS_INLINE static constexpr GSVector4i VRAMPageRect(u32 pn)
+{
+  // TODO: Put page rects in a LUT instead?
+  return VRAMPageRect(pn % VRAM_PAGES_WIDE, pn / VRAM_PAGES_WIDE);
+}
+
+ALWAYS_INLINE static constexpr u32 VRAMCoordinateToPage(u32 x, u32 y)
+{
+  return VRAMPageIndex(x / VRAM_PAGE_WIDTH, y / VRAM_PAGE_HEIGHT);
+}
+
+ALWAYS_INLINE static constexpr u32 VRAMPageStartX(u32 pn)
+{
+  return (pn % VRAM_PAGES_WIDE) * VRAM_PAGE_WIDTH;
+}
+
+ALWAYS_INLINE static constexpr u32 VRAMPageStartY(u32 pn)
+{
+  return (pn / VRAM_PAGES_WIDE) * VRAM_PAGE_HEIGHT;
+}
+
+ALWAYS_INLINE static constexpr u8 GetTextureModeShift(GPUTextureMode mode)
+{
+  return ((mode < GPUTextureMode::Direct16Bit) ? (2 - static_cast<u8>(mode)) : 0);
+}
+
+ALWAYS_INLINE static constexpr u32 ApplyTextureModeShift(GPUTextureMode mode, u32 vram_width)
+{
+  return vram_width << GetTextureModeShift(mode);
+}
+
+ALWAYS_INLINE static GSVector4i ApplyTextureModeShift(GPUTextureMode mode, const GSVector4i rect)
+{
+  return rect.sll32(GetTextureModeShift(mode));
+}
+
+ALWAYS_INLINE static constexpr u32 TexturePageCountForMode(GPUTextureMode mode)
+{
+  return ((mode < GPUTextureMode::Direct16Bit) ? (1 + static_cast<u8>(mode)) : 4);
+}
+
+ALWAYS_INLINE static constexpr u32 TexturePageWidthForMode(GPUTextureMode mode)
+{
+  return TEXTURE_PAGE_WIDTH >> GetTextureModeShift(mode);
+}
+
+ALWAYS_INLINE static constexpr bool TexturePageIsWrapping(GPUTextureMode mode, u32 pn)
+{
+  return ((VRAMPageStartX(pn) + TexturePageWidthForMode(mode)) > VRAM_WIDTH);
+}
+
+ALWAYS_INLINE static constexpr u32 PalettePageCountForMode(GPUTextureMode mode)
+{
+  return (mode == GPUTextureMode::Palette4Bit) ? 1 : 4;
+}
+
+ALWAYS_INLINE static constexpr u32 PalettePageNumber(GPUTexturePaletteReg reg)
+{
+  return VRAMCoordinateToPage(reg.GetXBase(), reg.GetYBase());
+}
+
+ALWAYS_INLINE static constexpr GSVector4i GetTextureRect(u32 pn, GPUTextureMode mode)
+{
+  u32 left = VRAMPageStartX(pn);
+  u32 top = VRAMPageStartY(pn);
+  u32 right = left + TexturePageWidthForMode(mode);
+  u32 bottom = top + VRAM_PAGE_HEIGHT;
+  if (right > VRAM_WIDTH) [[unlikely]]
+  {
+    left = 0;
+    right = VRAM_WIDTH;
+  }
+  if (bottom > VRAM_HEIGHT) [[unlikely]]
+  {
+    top = 0;
+    bottom = VRAM_HEIGHT;
+  }
+
+  return GSVector4i::cxpr(left, top, right, bottom);
+}
+
+/// Returns the maximum index for a paletted texture.
+ALWAYS_INLINE static constexpr u32 GetPaletteWidth(GPUTextureMode mode)
+{
+  return (mode == GPUTextureMode::Palette4Bit ? 16 : ((mode == GPUTextureMode::Palette8Bit) ? 256 : 0));
+}
+
+/// Returns a rectangle comprising the texture palette area.
+ALWAYS_INLINE static constexpr GSVector4i GetPaletteRect(GPUTexturePaletteReg palette, GPUTextureMode mode,
+                                                         bool clamp_instead_of_wrapping = false)
+{
+  const u32 width = GetPaletteWidth(mode);
+  u32 left = palette.GetXBase();
+  u32 top = palette.GetYBase();
+  u32 right = left + width;
+  u32 bottom = top + 1;
+  if (right > VRAM_WIDTH) [[unlikely]]
+  {
+    right = VRAM_WIDTH;
+    left = clamp_instead_of_wrapping ? left : 0;
+  }
+  return GSVector4i::cxpr(left, top, right, bottom);
+}
 
 // 4x4 dither matrix.
 static constexpr s32 DITHER_MATRIX[DITHER_MATRIX_SIZE][DITHER_MATRIX_SIZE] = {{-4, +0, -3, +1},  // row 0
@@ -235,9 +363,10 @@ enum class GPUBackendCommandType : u8
   UpdateVRAM,
   CopyVRAM,
   SetDrawingArea,
+  UpdateCLUT,
   DrawPolygon,
   DrawRectangle,
-  DrawLine
+  DrawLine,
 };
 
 union GPUBackendCommandParameters
@@ -251,8 +380,6 @@ union GPUBackendCommandParameters
 
   BitField<u8, bool, 2, 1> set_mask_while_drawing;
   BitField<u8, bool, 3, 1> check_mask_before_draw;
-
-  ALWAYS_INLINE bool IsMaskingEnabled() const { return (bits & 12u) != 0u; }
 
   // During transfer/render operations, if ((dst_pixel & mask_and) == 0) { pixel = src_pixel | mask_or }
   u16 GetMaskAND() const
@@ -309,7 +436,14 @@ struct GPUBackendCopyVRAMCommand : public GPUBackendCommand
 
 struct GPUBackendSetDrawingAreaCommand : public GPUBackendCommand
 {
-  Common::Rectangle<u32> new_area;
+  GPUDrawingArea new_area;
+  s32 new_clamped_area[4];
+};
+
+struct GPUBackendUpdateCLUTCommand : public GPUBackendCommand
+{
+  GPUTexturePaletteReg reg;
+  bool clut_is_8bit;
 };
 
 struct GPUBackendDrawCommand : public GPUBackendCommand
@@ -318,8 +452,6 @@ struct GPUBackendDrawCommand : public GPUBackendCommand
   GPURenderCommand rc;
   GPUTexturePaletteReg palette;
   GPUTextureWindow window;
-
-  ALWAYS_INLINE bool IsDitheringEnabled() const { return rc.IsDitheringEnabled() && draw_mode.dither_enable; }
 };
 
 struct GPUBackendDrawPolygonCommand : public GPUBackendDrawCommand

@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #pragma once
 #include "core/types.h"
@@ -7,7 +7,7 @@
 
 #include "ui_biossettingswidget.h"
 
-class SettingsDialog;
+class SettingsWindow;
 
 enum class ConsoleRegion;
 namespace BIOS {
@@ -19,18 +19,20 @@ class BIOSSettingsWidget : public QWidget
   Q_OBJECT
 
 public:
-  explicit BIOSSettingsWidget(SettingsDialog* dialog, QWidget* parent);
+  explicit BIOSSettingsWidget(SettingsWindow* dialog, QWidget* parent);
   ~BIOSSettingsWidget();
+
+  static void populateDropDownForRegion(ConsoleRegion region, QComboBox* cb,
+                                        std::vector<std::pair<std::string, const BIOS::ImageInfo*>>& images,
+                                        bool per_game);
+  static void setDropDownValue(QComboBox* cb, const std::optional<std::string>& name, bool per_game);
 
 private Q_SLOTS:
   void refreshList();
+  void onFastBootChanged();
 
 private:
-  void populateDropDownForRegion(ConsoleRegion region, QComboBox* cb,
-                                 std::vector<std::pair<std::string, const BIOS::ImageInfo*>>& images);
-  void setDropDownValue(QComboBox* cb, const std::optional<std::string>& name);
-
   Ui::BIOSSettingsWidget m_ui;
 
-  SettingsDialog* m_dialog;
+  SettingsWindow* m_dialog;
 };

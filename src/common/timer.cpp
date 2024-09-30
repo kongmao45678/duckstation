@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
-// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
 
 #include "timer.h"
 #include "types.h"
@@ -135,7 +135,7 @@ void Timer::SleepUntil(Value value, bool exact)
     }
 
     // falling back to sleep... bad.
-    Sleep(static_cast<DWORD>(static_cast<u64>(diff) / 1000000));
+    Sleep(static_cast<DWORD>(ConvertValueToMilliseconds(diff)));
   }
 }
 
@@ -288,6 +288,39 @@ double Timer::GetTimeNanosecondsAndReset()
   return ret;
 }
 
+bool Timer::ResetIfSecondsPassed(double s)
+{
+  const Value value = GetCurrentValue();
+  const double ret = ConvertValueToSeconds(value - m_tvStartValue);
+  if (ret < s)
+    return false;
+
+  m_tvStartValue = value;
+  return true;
+}
+
+bool Timer::ResetIfMillisecondsPassed(double s)
+{
+  const Value value = GetCurrentValue();
+  const double ret = ConvertValueToMilliseconds(value - m_tvStartValue);
+  if (ret < s)
+    return false;
+
+  m_tvStartValue = value;
+  return true;
+}
+
+bool Timer::ResetIfNanosecondsPassed(double s)
+{
+  const Value value = GetCurrentValue();
+  const double ret = ConvertValueToNanoseconds(value - m_tvStartValue);
+  if (ret < s)
+    return false;
+
+  m_tvStartValue = value;
+  return true;
+}
+
 void Timer::BusyWait(std::uint64_t ns)
 {
   const Value start = GetCurrentValue();
@@ -336,7 +369,7 @@ void Timer::NanoSleep(std::uint64_t ns)
     if (SetWaitableTimer(timer, &due_time, 0, nullptr, nullptr, FALSE))
       WaitForSingleObject(timer, INFINITE);
     else
-      std::fprintf(stderr, "SetWaitableTimer() failed: %08X\n", GetLastError());
+      std::fprintf(stderr, "SetWaitableTimer() failed: %08X\n", static_cast<unsigned>(GetLastError()));
   }
   else
   {

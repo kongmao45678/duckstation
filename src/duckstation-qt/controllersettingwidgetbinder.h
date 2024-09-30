@@ -1,7 +1,12 @@
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: CC-BY-NC-ND-4.0
+
 #pragma once
 
-#include <optional>
-#include <type_traits>
+#include "qthost.h"
+#include "settingwidgetbinder.h"
+
+#include "core/host.h"
 
 #include <QtCore/QtCore>
 #include <QtGui/QAction>
@@ -11,10 +16,8 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QSpinBox>
-
-#include "core/host_settings.h"
-#include "qthost.h"
-#include "settingwidgetbinder.h"
+#include <optional>
+#include <type_traits>
 
 /// This nastyness is required because input profiles aren't overlaid settings like the rest of them, it's
 /// input profile *or* global, not both.
@@ -34,7 +37,7 @@ static void BindWidgetToInputProfileBool(SettingsInterface* sif, WidgetType* wid
     Accessor::connectValueChanged(widget, [sif, widget, section = std::move(section), key = std::move(key)]() {
       const bool new_value = Accessor::getBoolValue(widget);
       sif->SetBoolValue(section.c_str(), key.c_str(), new_value);
-      sif->Save();
+      QtHost::SaveGameSettings(sif, false);
       g_emu_thread->reloadGameSettings();
     });
   }
@@ -67,7 +70,7 @@ static void BindWidgetToInputProfileFloat(SettingsInterface* sif, WidgetType* wi
     Accessor::connectValueChanged(widget, [sif, widget, section = std::move(section), key = std::move(key)]() {
       const float new_value = Accessor::getFloatValue(widget);
       sif->SetFloatValue(section.c_str(), key.c_str(), new_value);
-      sif->Save();
+      QtHost::SaveGameSettings(sif, false);
       g_emu_thread->reloadGameSettings();
     });
   }
@@ -100,7 +103,7 @@ static void BindWidgetToInputProfileNormalized(SettingsInterface* sif, WidgetTyp
     Accessor::connectValueChanged(widget, [sif, widget, section = std::move(section), key = std::move(key), range]() {
       const int new_value = Accessor::getIntValue(widget);
       sif->SetFloatValue(section.c_str(), key.c_str(), static_cast<float>(new_value) / range);
-      sif->Save();
+      QtHost::SaveGameSettings(sif, false);
       g_emu_thread->reloadGameSettings();
     });
   }
@@ -139,7 +142,7 @@ static void BindWidgetToInputProfileString(SettingsInterface* sif, WidgetType* w
       else
         sif->DeleteValue(section.c_str(), key.c_str());
 
-      sif->Save();
+      QtHost::SaveGameSettings(sif, false);
       g_emu_thread->reloadGameSettings();
     });
   }
